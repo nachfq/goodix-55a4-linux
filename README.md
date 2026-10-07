@@ -75,5 +75,7 @@ and [goodix-fp-dump](https://github.com/goodix-fp-linux-dev/goodix-fp-dump).
 We will also evaluate [GuNanOvO/goodix-55x4-linux](https://github.com/GuNanOvO/goodix-55x4-linux).
 The official project is [libfprint](https://gitlab.freedesktop.org/libfprint/libfprint).
 
-No third-party code has been incorporated yet. Review each component's license
-and preserve attribution before doing so.
+The diagnostic probe adapts protocol framing and query definitions from the
+pinned MIT-licensed dump source. Its attribution and license notice are preserved
+in the script and `LICENSES/`. No community driver library is vendored here.
+Review each component's license and preserve attribution before incorporating more code.

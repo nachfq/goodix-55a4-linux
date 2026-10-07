@@ -134,7 +134,12 @@ The dump repository's root license is MIT. The libfprint root `COPYING` contains
 LGPL 2.1, and the reviewed 55x4 driver header specifies LGPL 2.1 or later.
 Individual files and any code we later incorporate still need attribution review.
 
-## Proposed next small test — not implemented or executed
+## Proposed next small test — implementation prepared later, hardware execution pending
+
+The following proposal was subsequently implemented in
+[`scripts/03-probe-sensor.py`](../scripts/03-probe-sensor.py). See the
+[walkthrough](walkthrough.md) for its plan, dependency check, and offline tests.
+It has not been executed against the sensor by the assistant.
 
 Prepare a narrow diagnostic that reports only firmware version and whether the
 returned key-state hash matches the public expected value. It should have a

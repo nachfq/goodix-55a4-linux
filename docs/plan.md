@@ -22,8 +22,9 @@ The download only stored sources. No setup, pip, Meson, project Python code, or
 USB operation was executed. The patch applies to the pinned base and is assembled
 in a separate ignored worktree. The [focused source review](source-review.md)
 documents initialization, key provisioning, firmware entry points, and a TLS
-retry defect. A narrow firmware/key-state diagnostic is proposed there but has
-not been implemented or executed.
+retry defect. A narrow firmware/key-state diagnostic is now prepared in
+`scripts/03-probe-sensor.py`, with offline tests. Its plan and dependencies are
+described in the [walkthrough](walkthrough.md). Hardware execution remains pending.
 
 Continue the audit:
 

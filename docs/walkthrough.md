@@ -1,7 +1,7 @@
 # Run the experiments yourself
 
 Read one script, run it, and discuss its output before moving to the next one.
-Each script displays its commands and waits for Enter before the next step.
+Each hardware walkthrough displays its operations and waits for Enter before the next step.
 Ctrl+C stops the walkthrough. Use your regular terminal without sudo.
 
 ## 1. Detection: two different layers
@@ -48,6 +48,61 @@ These files are ignored. A fresh clone of our public repository will not contain
 them; the script reports missing files rather than downloading anything.
 It checks the clean base, not the intentionally modified `libfprint-patched` tree.
 
+## 3. Firmware and expected key state: inspect before running
+
+Open [scripts/03-probe-sensor.py](../scripts/03-probe-sensor.py), then start with:
+
+```sh
+python3 scripts/03-probe-sensor.py --plan
+python3 scripts/03-probe-sensor.py --check-dependencies
+```
+
+Both modes work without opening a USB device. Running the script without arguments
+also shows the plan. Start reading at `QUERIES`: it contains only NOP (`0x00`),
+firmware version (`0xa8`), and key-state query (`0xe4`). `encode_frame()` shows how
+the command is wrapped and padded; `run_probe()` puts the steps in order.
+
+For hardware execution, the explicit mode is `--run`. Review the plan and local
+dependency setup together before using it. The local Python currently lacks
+PyUSB; libusb was found. No dependency has been installed for this delivery.
+The script does not install packages or download anything.
+
+`--run` reads the current USB configuration and claims its existing data/vendor
+interface at alternate setting zero. It refuses an attached kernel driver and
+stops if the claim fails. It does not detach drivers, change configuration, reset
+the sensor, or stop fprintd. The interface and USB handle are released on exit.
+Initialization drains at most four pending input transfers and sends NOP;
+each query then expects an acknowledgement and a matching reply.
+Writes have a 1-second timeout. Each receive uses at most eight USB reads with
+a 1-second timeout each (100 ms for the NOP response). Packet lengths are bounded.
+
+The firmware identifier is printed. Returned key-state data is compared privately
+with the public expected hash; only `MATCH` or `MISMATCH` is printed. `MISMATCH`
+means the expected state was not observed; it does not establish an absent key.
+An unsuccessful or malformed response is an error. There is no automatic repair.
+
+| Exit status | Meaning |
+| --- | --- |
+| `0` | Plan completed, dependencies found, or hardware queries completed with expected key state, depending on selected mode |
+| `1` | Hardware/protocol error; inconclusive probe |
+| `2` | Dependencies missing or invalid CLI arguments |
+| `3` | Hardware queries completed; expected key state did not match |
+| `130` | Operator stopped the hardware walkthrough |
+
+The protocol framing and query definitions are adapted from the reviewed MIT
+source. Attribution is in the script and the original notice is preserved in
+[LICENSES/goodix-fp-dump-MIT.txt](../LICENSES/goodix-fp-dump-MIT.txt). No community
+modules are imported. Query behavior on this laptop remains untested; no captures,
+key writes, firmware updates, TLS handshake, or enrollment are implemented here.
+
+Offline checks use synthetic packets and a fake USB transport:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+These tests verify protocol handling and command restrictions, not real sensor support.
+
 ## How we work from here
 
 The owner runs the experiments. The assistant prepares small scripts, explains
@@ -56,6 +111,5 @@ new hardware conclusions. Hardware execution is delegated to the assistant only
 when explicitly requested. Scripts save no logs automatically and upload nothing.
 Share only the relevant output after reviewing it.
 
-A direct firmware/key-state query is a future script. Its USB initialization and
-command list will be reviewed together before its first run. These two walkthroughs
-do not execute any community driver code or query its key state.
+The direct firmware/key-state query is prepared for review and has not been run
+against the hardware by the assistant. Review its plan and dependencies first.
