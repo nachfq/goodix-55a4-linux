@@ -1,0 +1,24 @@
+# Fuentes externas, compilaciones y entornos locales
+/work/
+/vendor/
+/build/
+.venv/
+__pycache__/
+*.pyc
+
+# Datos biométricos y evidencia privada; revisar también el contenido antes de publicar
+/private/
+/captures/
+/templates/
+/logs/
+*.pcap
+*.pcapng
+*.pgm
+*.raw
+*.bin
+*.log
+
+# Credenciales locales
+.env
+.env.*
+!.env.example
