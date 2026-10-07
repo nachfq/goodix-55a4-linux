@@ -5,6 +5,12 @@ The owner wants to learn step by step. Keep repository content, filenames,
 commit messages, and GitHub metadata in English. Continue explaining progress
 to the owner in Spanish unless asked otherwise.
 
+- The owner wants to run and understand experiments personally. Prepare small,
+  readable scripts and explain one experiment at a time. Leave hardware and
+  detection runs to the owner unless explicitly delegated; wait for their output
+  before proceeding to the next experiment. Offline syntax and source checks are
+  allowed. Do not silently run the experiment while preparing it.
+
 - Before downloading additional sources, installing packages, or making persistent
   sensor changes, explain the exact operations and agree on their scope with the
   owner. Do not infer authorization for future stages from an earlier approval.

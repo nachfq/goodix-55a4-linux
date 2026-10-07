@@ -8,8 +8,21 @@ measure its behavior. That evidence will guide whether to maintain a libfprint
 patch or develop the missing components.
 
 **Status: source audit in progress; baseline detection test completed. There is no custom driver
-or tested community installation on this laptop yet.** This repository currently
-contains original documentation, without vendored drivers or installers.
+or tested community installation on this laptop yet.** This repository contains
+original documentation and small interactive diagnostic scripts, without vendored
+drivers or installers.
+
+## Hands-on walkthrough
+
+Start with [the walkthrough](docs/walkthrough.md). Read `scripts/01-detect.sh`,
+then run it yourself:
+
+```sh
+bash scripts/01-detect.sh
+```
+
+It displays each command and waits for Enter. We will interpret your results
+together before the next experiment.
 
 ## Starting point
 
