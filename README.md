@@ -7,7 +7,7 @@ We will first audit the community implementation, understand the protocol, and
 measure its behavior. That evidence will guide whether to maintain a libfprint
 patch or develop the missing components.
 
-**Status: preliminary audit and baseline detection test. There is no custom driver
+**Status: source audit in progress; baseline detection test completed. There is no custom driver
 or tested community installation on this laptop yet.** This repository currently
 contains original documentation, without vendored drivers or installers.
 
@@ -34,6 +34,8 @@ including rejection of fingers other than the enrolled one.
 2. [Sources and revisions](docs/sources.md): available code and pending reviews.
 3. [Staged plan](docs/plan.md): next steps and test criteria.
 4. [Baseline detection test](docs/baseline-test.md): the first local test and its limits.
+5. [Pinned source review](docs/source-review.md): downloaded dependencies,
+   provisioning/firmware paths, and a TLS retry finding.
 
 Before downloading more source code, installing dependencies, or writing to the
 sensor, explain the exact operation, its purpose, and its effects to the owner.

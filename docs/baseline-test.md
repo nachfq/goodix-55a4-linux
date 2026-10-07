@@ -61,5 +61,7 @@ Read-only tool checks found `ninja`, `gcc`, and `pkg-config` on PATH, but no
 inventory, not a complete dependency assessment; an absent pkg-config entry does
 not by itself prove every corresponding library file is absent.
 
-The next prerequisite for a community-driver test is reviewing the pinned source
-dependencies, followed by a separately scoped build. See the [staged plan](plan.md).
+The next prerequisite identified by this baseline was reviewing the pinned source
+dependencies, followed by a separately scoped build. The subsequent
+[source review](source-review.md) records that progress and proposes a narrower
+firmware/key-state query before capture. See the [staged plan](plan.md).

@@ -1,5 +1,9 @@
 # Preliminary audit — 2026-10-07
 
+This report records the initial review before downloading the dependencies.
+The later [pinned source review](source-review.md) corroborates the PSK constants
+and host-side write arguments and adds findings from the assembled driver.
+
 ## Scope and provisional conclusion
 
 Static inspection of preparation, installation, uninstallation, key provisioning,

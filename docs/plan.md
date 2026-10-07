@@ -10,22 +10,25 @@ Do not use the community installer as a shortcut to combine stages.
 - Publish the preliminary review and open questions.
 - Run the [baseline detection test](baseline-test.md) using installed software.
 
-## 1. Complete the source audit — proposed, not yet executed
+## 1. Complete the source audit — in progress
 
-First review the remaining local patch. Then propose downloading its two required
-repositories under `work/` at these exact commits:
+The owner authorized downloading the two required repositories under ignored
+`work/`. Both exact commits have now been fetched and checked:
 
 - TheWeirdDev/libfprint: `d1ca62a801aa565e67d1a2a47aaa7a33232b7990`.
 - goodix-fp-linux-dev/goodix-fp-dump: `cc43bb3b3154a0bccc0412ae024013c7e1923139`.
 
-The proposed download would only store source files. It would not execute setup,
-pip, Meson, project Python code, or USB operations. Explain the commands and agree
-on this scope with the owner before downloading.
+The download only stored sources. No setup, pip, Meson, project Python code, or
+USB operation was executed. The patch applies to the pinned base and is assembled
+in a separate ignored worktree. The [focused source review](source-review.md)
+documents initialization, key provisioning, firmware entry points, and a TLS
+retry defect. A narrow firmware/key-state diagnostic is proposed there but has
+not been implemented or executed.
 
-With the sources available:
+Continue the audit:
 
-- Trace `init_device → check_psk → write_psk` down to USB messages; inventory key,
-  firmware, configuration, and any other persistent-state writes.
+- Extend the completed `init_device → check_psk → write_psk` trace to the remaining
+  capture paths; assess firmware-side effects and recovery limits.
 - Review framing, lengths, checksums, timeouts, cancellation, and C/C++ memory handling.
 - Review the PSK, TLS negotiation, image acquisition, and SIGFM matching.
 - Review build/runtime dependencies, licenses, and divergence from upstream.
