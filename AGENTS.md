@@ -1,21 +1,25 @@
-# Instrucciones de trabajo
+# Working instructions
 
-Este proyecto investiga Goodix USB 27c6:55a4 en una ThinkPad E14 Gen 2.
-El propietario quiere aprender paso a paso. Explicar cada avance en español.
+This project investigates Goodix USB 27c6:55a4 on a ThinkPad E14 Gen 2.
+The owner wants to learn step by step. Keep repository content, filenames,
+commit messages, and GitHub metadata in English. Continue explaining progress
+to the owner in Spanish unless asked otherwise.
 
-- Antes de descargar fuentes adicionales, instalar paquetes o realizar cambios
-  persistentes en el sensor, explicar las operaciones concretas y acordar el alcance
-  con el propietario. No inferir autorización de una etapa futura por haber
-  autorizado una anterior. Respetar autorizaciones explícitas de la conversación.
-- La etapa actual es auditoría. No ejecutar instaladores comunitarios ni utilidades
-  de provisión. No tocar PAM, sudo, bloqueo o servicios como parte de esta etapa.
-- Distinguir observación local, afirmación de terceros e hipótesis. Vincular cada
-  hallazgo a un commit y archivo; no presentar una lectura parcial como auditoría completa.
-- No publicar imágenes de huellas, plantillas, dumps, capturas USB, secretos ni
-  logs sin revisar. Usar rutas locales ignoradas para datos experimentales.
-- Conservar atribuciones y revisar licencias antes de incorporar código ajeno.
-- Separar descarga, compilación, acceso USB, provisión e instalación en pasos
-  revisables. Registrar errores y timeouts como pruebas inconclusas, no como
-  rechazos biométricos correctos.
-- Leer README.md y docs/ antes de proponer cambios. Mantener la documentación
-  coherente con el estado real, sin marcar pruebas futuras como realizadas.
+- Before downloading additional sources, installing packages, or making persistent
+  sensor changes, explain the exact operations and agree on their scope with the
+  owner. Do not infer authorization for future stages from an earlier approval.
+  Honor explicit authorizations already given in the conversation.
+- The current stage is auditing and baseline detection using installed software.
+  Do not run community installers or provisioning utilities. Do not change PAM,
+  sudo, screen locking, or service configuration as part of this stage. A device
+  listing may activate the installed fprintd through D-Bus; document that effect.
+- Distinguish local observations, third-party claims, and hypotheses. Link findings
+  to a commit and file. Do not present a partial review as a complete audit.
+- Do not publish fingerprint images, templates, dumps, USB captures, secrets, or
+  unreviewed logs. Use ignored local paths for experimental data.
+- Preserve attribution and review licenses before incorporating third-party code.
+- Separate downloading, building, USB access, provisioning, and installation into
+  reviewable steps. Count errors and timeouts as inconclusive trials, not correct
+  biometric rejections.
+- Read README.md and docs/ before proposing changes. Keep documentation consistent
+  with the actual state; never mark future tests as completed.

@@ -1,63 +1,64 @@
-# Goodix 55a4 en Linux
+# Goodix 55a4 on Linux
 
-Investigación y desarrollo paso a paso para usar el lector **Goodix USB
-`27c6:55a4`** de una **Lenovo ThinkPad E14 Gen 2** en Linux.
+Step-by-step research and development to use the **Goodix USB `27c6:55a4`**
+fingerprint reader in a **Lenovo ThinkPad E14 Gen 2** on Linux.
 
-Primero vamos a auditar el trabajo comunitario, entender el protocolo y medir
-el comportamiento. Con esa evidencia decidiremos si mantener un parche sobre
-libfprint o desarrollar los componentes que falten.
+We will first audit the community implementation, understand the protocol, and
+measure its behavior. That evidence will guide whether to maintain a libfprint
+patch or develop the missing components.
 
-**Estado: auditoría inicial. Todavía no hay un controlador propio ni una
-instalación probada en esta notebook.** Este repositorio empieza con documentación
-original; no contiene copias de los controladores ni ejecuta instaladores.
+**Status: preliminary audit and baseline detection test. There is no custom driver
+or tested community installation on this laptop yet.** This repository currently
+contains original documentation, without vendored drivers or installers.
 
-## Punto de partida
+## Starting point
 
-| Elemento | Estado al 2026-10-07 | Evidencia |
+| Component | Status as of 2026-10-07 | Evidence |
 | --- | --- | --- |
-| Notebook | ThinkPad E14 Gen 2, modelo `20TBS10100` | Informado por el propietario |
-| Sistema | Omarchy, basado en Arch Linux | Informado por el propietario |
-| Sensor USB | `27c6:55a4` | Reconfirmado con `lsusb -d 27c6:55a4` |
-| libfprint | `libfprint-git 1:1.94.100.r10.g6f9479c-1` | Reconfirmado con `pacman -Q` |
-| fprintd | `1.94.5-2` | Reconfirmado con `pacman -Q` |
-| Detección por fprintd | `No devices available` | Resultado previo informado; no repetido en esta etapa |
-| Soporte oficial | No figuraba al consultarlo previamente | Pendiente de consultar nuevamente |
+| Laptop | ThinkPad E14 Gen 2, model `20TBS10100` | Reported by the owner |
+| System | Omarchy, based on Arch Linux | Reported by the owner |
+| USB sensor | `27c6:55a4` | Reconfirmed with `lsusb -d 27c6:55a4` |
+| libfprint | `libfprint-git 1:1.94.100.r10.g6f9479c-1` | Reconfirmed with `pacman -Q` |
+| fprintd | `1.94.5-2` | Reconfirmed with `pacman -Q` |
+| fprintd detection | `No devices available` | Reproduced in the [baseline test](docs/baseline-test.md) |
+| Official support | Not listed when previously checked | Current upstream support remains to be checked |
 
-Que USB detecte el dispositivo no demuestra que libfprint pueda inicializarlo.
-La primera meta es lograr detección, lectura, registro y verificación, incluyendo
-rechazo de dedos diferentes al registrado.
+USB enumeration does not demonstrate that libfprint can initialize the device.
+The first milestone is detection, image acquisition, enrollment, and verification,
+including rejection of fingers other than the enrolled one.
 
-## Recorrido
+## Reading guide
 
-1. [Auditoría inicial de la copia comunitaria](docs/auditoria-inicial.md):
-   evidencia, hallazgos y preguntas abiertas.
-2. [Fuentes y revisiones](docs/fuentes.md): qué código está disponible y qué falta revisar.
-3. [Plan por etapas](docs/plan.md): próximos pasos y criterios de prueba.
+1. [Preliminary community-code audit](docs/initial-audit.md): evidence, findings,
+   and open questions.
+2. [Sources and revisions](docs/sources.md): available code and pending reviews.
+3. [Staged plan](docs/plan.md): next steps and test criteria.
+4. [Baseline detection test](docs/baseline-test.md): the first local test and its limits.
 
-Antes de descargar más fuentes, instalar dependencias o escribir en el sensor,
-se explicará la operación concreta, su propósito y sus efectos al propietario.
-La autorización de una etapa no autoriza automáticamente la siguiente.
+Before downloading more source code, installing dependencies, or writing to the
+sensor, explain the exact operation, its purpose, and its effects to the owner.
+Authorization for one stage does not automatically authorize later stages.
 
-PAM, desbloqueo y sudo quedan para después de verificar el reconocimiento.
-Passkeys y autorización de firmas requieren integraciones adicionales. fprintd
-no las habilita por sí solo; las firmas de commits seguirían usando claves SSH
-o GPG y una eventual integración biométrica autorizaría su uso.
+PAM, screen unlocking, and sudo integration come after recognition testing.
+Passkeys and signing-key authorization require additional integrations. fprintd
+does not enable them by itself; commit signing would still use SSH or GPG keys,
+with any future biometric integration authorizing their use.
 
-## Datos de las pruebas
+## Test data
 
-Este repo es público. Se publicarán código, metodología y resultados agregados
-revisados. Las imágenes de huellas, plantillas, capturas USB y volcados del sensor
-se mantendrán fuera del historial. `.gitignore` ayuda a evitar inclusiones
-accidentales, pero no reemplaza revisar lo que se va a subir.
+This repository is public. Publish reviewed code, methodology, and aggregate
+results. Keep fingerprint images, templates, USB captures, and sensor dumps out
+of Git history. `.gitignore` helps prevent accidental additions but does not
+replace reviewing everything before publishing.
 
-## Procedencia
+## Attribution
 
-El punto de partida es el trabajo de
+The starting point is the work by
 [Hydrogell](https://github.com/Hydrogell/goodix-27c6-55a4-fingerprint-linux),
-basado en [TheWeirdDev/libfprint](https://github.com/TheWeirdDev/libfprint/tree/55b4-experimental)
-y [goodix-fp-dump](https://github.com/goodix-fp-linux-dev/goodix-fp-dump).
-También se evaluará [GuNanOvO/goodix-55x4-linux](https://github.com/GuNanOvO/goodix-55x4-linux).
-El proyecto oficial es [libfprint](https://gitlab.freedesktop.org/libfprint/libfprint).
+based on [TheWeirdDev/libfprint](https://github.com/TheWeirdDev/libfprint/tree/55b4-experimental)
+and [goodix-fp-dump](https://github.com/goodix-fp-linux-dev/goodix-fp-dump).
+We will also evaluate [GuNanOvO/goodix-55x4-linux](https://github.com/GuNanOvO/goodix-55x4-linux).
+The official project is [libfprint](https://gitlab.freedesktop.org/libfprint/libfprint).
 
-Todavía no se incorporó código de terceros. Antes de hacerlo se revisarán las
-licencias de cada componente y se conservarán sus atribuciones.
+No third-party code has been incorporated yet. Review each component's license
+and preserve attribution before doing so.

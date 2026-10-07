@@ -1,4 +1,4 @@
-# Fuentes externas, compilaciones y entornos locales
+# External sources, builds, and local environments
 /work/
 /vendor/
 /build/
@@ -6,7 +6,7 @@
 __pycache__/
 *.pyc
 
-# Datos biométricos y evidencia privada; revisar también el contenido antes de publicar
+# Biometric data and private evidence; also review content before publishing
 /private/
 /captures/
 /templates/
@@ -18,7 +18,7 @@ __pycache__/
 *.bin
 *.log
 
-# Credenciales locales
+# Local credentials
 .env
 .env.*
 !.env.example
