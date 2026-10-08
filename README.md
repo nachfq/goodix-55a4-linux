@@ -7,8 +7,10 @@ We will first audit the community implementation, understand the protocol, and
 measure its behavior. That evidence will guide whether to maintain a libfprint
 patch or develop the missing components.
 
-**Status: source audit in progress; baseline detection test completed. There is no custom driver
-or tested community installation on this laptop yet.** This repository contains
+**Status: partial source audit; baseline detection and the owner's bounded query
+completed. Firmware is `GF3268_RTSEC_APP_10062`; expected key state is `MISMATCH`.
+An owner-run local build walkthrough is prepared.** No community driver has been built or tested
+on this laptop. This repository contains
 original documentation and small interactive diagnostic scripts, without vendored
 drivers or installers.
 
@@ -49,6 +51,8 @@ including rejection of fingers other than the enrolled one.
 4. [Baseline detection test](docs/baseline-test.md): the first local test and its limits.
 5. [Pinned source review](docs/source-review.md): downloaded dependencies,
    provisioning/firmware paths, and a TLS retry finding.
+6. [Owner-run firmware/key-state trial](docs/probe-test.md): observed query
+   results and their limits.
 
 Before downloading more source code, installing dependencies, or writing to the
 sensor, explain the exact operation, its purpose, and its effects to the owner.

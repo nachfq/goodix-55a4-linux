@@ -15,8 +15,9 @@ to the owner in Spanish unless asked otherwise.
   sensor changes, explain the exact operations and agree on their scope with the
   owner. Do not infer authorization for future stages from an earlier approval.
   Honor explicit authorizations already given in the conversation.
-- The current stage is auditing and preparing a bounded firmware/key-state probe
-  for the owner to review and run. Hardware execution remains pending.
+- The current stage is auditing and preparing an owner-run local build. The owner
+  completed the bounded firmware/key-state probe; see docs/probe-test.md.
+  Community-driver hardware execution and biometric tests remain pending.
   Do not run community installers or provisioning utilities. Do not change PAM,
   sudo, screen locking, or service configuration as part of this stage. A device
   listing may activate the installed fprintd through D-Bus; document that effect.

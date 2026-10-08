@@ -24,7 +24,11 @@ in a separate ignored worktree. The [focused source review](source-review.md)
 documents initialization, key provisioning, firmware entry points, and a TLS
 retry defect. A narrow firmware/key-state diagnostic is now prepared in
 `scripts/03-probe-sensor.py`, with offline tests. Its plan and dependencies are
-described in the [walkthrough](walkthrough.md). Hardware execution remains pending.
+described in the [walkthrough](walkthrough.md).
+The owner subsequently ran that diagnostic and reported firmware
+`GF3268_RTSEC_APP_10062` and expected key state `MISMATCH`; see the
+[recorded trial](probe-test.md). This completes the bounded query,
+not capture, enrollment, or verification.
 
 Continue the audit:
 
@@ -40,6 +44,11 @@ informed decision on components to retain. Do not choose a fork or reimplementat
 before this analysis.
 
 ## 2. Local build
+
+The selected next delivery is specified in the
+[local build initiative](../.agent-context/plans/local-driver-build/plan.md).
+It prepares an owner-run walkthrough; compilation and any prerequisite
+installation remain separate review points.
 
 Prepare an unprivileged build without system installation. Identify missing
 dependencies and explain any proposed installation first. Check patch application,

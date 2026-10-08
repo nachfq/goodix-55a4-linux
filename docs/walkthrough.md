@@ -2,7 +2,8 @@
 
 Read one script, run it, and discuss its output before moving to the next one.
 Each hardware walkthrough displays its operations and waits for Enter before the next step.
-Ctrl+C stops the walkthrough. Use your regular terminal without sudo.
+Ctrl+C stops the walkthrough. Start in your regular terminal. The completed
+probe required one-shot sudo for USB access; local compilation must run without sudo.
 
 ## 1. Detection: two different layers
 
@@ -63,9 +64,10 @@ firmware version (`0xa8`), and key-state query (`0xe4`). `encode_frame()` shows 
 the command is wrapped and padded; `run_probe()` puts the steps in order.
 
 For hardware execution, the explicit mode is `--run`. Review the plan and local
-dependency setup together before using it. The local Python currently lacks
-PyUSB; libusb was found. No dependency has been installed for this delivery.
-The script does not install packages or download anything.
+dependency setup together before using it. The initial check lacked PyUSB; the
+owner subsequently prepared ignored `work/probe-venv` with PyUSB `1.3.1` and ran
+the probe. A fresh clone does not contain that environment. The script itself
+does not install packages or download anything.
 
 `--run` reads the current USB configuration and claims its existing data/vendor
 interface at alternate setting zero. It refuses an attached kernel driver and
@@ -92,8 +94,10 @@ An unsuccessful or malformed response is an error. There is no automatic repair.
 The protocol framing and query definitions are adapted from the reviewed MIT
 source. Attribution is in the script and the original notice is preserved in
 [LICENSES/goodix-fp-dump-MIT.txt](../LICENSES/goodix-fp-dump-MIT.txt). No community
-modules are imported. Query behavior on this laptop remains untested; no captures,
-key writes, firmware updates, TLS handshake, or enrollment are implemented here.
+modules are imported. The owner reported successful queries with firmware
+`GF3268_RTSEC_APP_10062` and expected key state `MISMATCH`; see the
+[recorded trial](probe-test.md). No captures, key writes, firmware updates, TLS
+handshake, or enrollment are implemented here.
 
 Offline checks use synthetic packets and a fake USB transport:
 
@@ -103,13 +107,63 @@ python3 -m unittest discover -s tests -v
 
 These tests verify protocol handling and command restrictions, not real sensor support.
 
+## 4. Local build: inspect prerequisites first
+
+Read [scripts/04-build-local.sh](../scripts/04-build-local.sh), then start with:
+
+```sh
+bash scripts/04-build-local.sh --plan
+bash scripts/04-build-local.sh --check-dependencies
+```
+
+The default mode only explains the plan. The dependency check inspects installed
+tools, library-discovery metadata, pinned source inputs, and the fresh output path;
+it does not configure, compile, download, install, or access USB. Share its output
+before starting the build. A missing
+dependency is a prerequisite to resolve together, not permission to install it.
+
+Start reading at `plan()` for the operations, then `preflight()` and
+`check_inputs()` for the checks. The final calls to `step()` are the experiment;
+each prints its arguments and waits for Enter, without `eval`.
+
+Meson prepares compilation instructions; Ninja compiles and links the selected
+shared library. OpenCV supplies image-processing support for SIGFM matching.
+Doctest remains a configuration dependency in this source even though this
+walkthrough does not compile or execute its tests. CMake is a possible discovery
+backend, not an unconditional project requirement. A missing pkg-config entry
+does not prove that every corresponding library file is absent.
+
+After discussing prerequisites, the owner can use the explicit interactive mode:
+
+```sh
+bash scripts/04-build-local.sh --run
+```
+
+Run without sudo. It validates the local source revision and patch, configures a
+fresh ignored `work/libfprint-build` directory, checks the generated library target,
+and builds only that target. It stops on failure and preserves existing directories. It
+does not load the resulting library into fprintd, run examples or upstream tests,
+provision a key, or change system configuration. The installed reader support
+therefore does not change just because the build finishes.
+
+If `work/libfprint-build` already exists, including after a failed trial, the script
+stops. It never removes or reuses that directory automatically. Review the output
+together before deciding where to preserve it and how to retry. Static `readelf`
+inspection describes the library's SONAME and dependencies without loading it.
+
+Meson writes generated build files and logs under ignored `work/`. Review any
+output before sharing; a successful compilation establishes that a library was
+built, not that it captures or recognizes fingerprints.
+
 ## How we work from here
 
 The owner runs the experiments. The assistant prepares small scripts, explains
 their commands, and checks syntax; it waits for the owner's output before drawing
 new hardware conclusions. Hardware execution is delegated to the assistant only
-when explicitly requested. Scripts save no logs automatically and upload nothing.
-Share only the relevant output after reviewing it.
+when explicitly requested. Scripts upload nothing. The query probe saves no logs;
+Meson generates local build logs under ignored `work/`. Share only relevant output
+after reviewing it.
 
-The direct firmware/key-state query is prepared for review and has not been run
-against the hardware by the assistant. Review its plan and dependencies first.
+The direct query has been run by the owner and its output discussed. The next
+experiment prepares a local build; it does not provision the mismatched key or
+activate the community driver.
