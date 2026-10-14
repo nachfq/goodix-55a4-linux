@@ -5,8 +5,10 @@ native experiment reported detection, enrollment, same-finger MATCH and
 other-finger NO_MATCH ([Test013–016](private-fprintd.md)). This document describes
 the reviewed deployment prepared in D14. On 2026-10-14 the owner then accepted
 installation and normal-host detection ("hagamoslo"). The assistant installed it
-and observed successful host detection; see Test017 below. Authentication
-integration remains disabled.
+and observed successful host detection; see Test017 below. Subsequent host
+enrollment and CLI comparisons are recorded in Test018–020. Separate
+[screen-unlock](lock-screen-integration.md) and [sudo/SDDM](sudo-login-integration.md)
+PAM integration followed; their effects and reversal are documented separately.
 No host installation, GC root, runtime mask, service reload/activation, USB trial,
 package/source acquisition or PAM/login/sudo/lock change occurred during preparation.
 
@@ -70,12 +72,15 @@ commands. They do not have script17's verification/close observer or declared
 same/other gates. In particular, native CLI NO_MATCH can represent an error;
 count errors/retries/cancellations/timeouts as inconclusive. One match/rejection
 report in the private trial is not a reliability estimate or authentication
-certification. Host native enrollment/verification are still untested.
+certification. Host enrollment and CLI verification were untested at the D14
+preparation checkpoint; subsequent observations are recorded in Test018–020.
 
 Private experiment state under `work/private-fprintd/` and
 `work/private-verification/`, plus original `/var/lib/fprint`, are never imported,
 overwritten or deleted. A separately reviewed host enrollment creates new state.
-PAM, sudo, lock screen, login and SSH/GPG key authorization remain unchanged.
+The driver deployment itself does not edit PAM. Subsequent screen-unlock and
+sudo/SDDM PAM additions are separate integrations; disable them before driver
+removal as described below. SSH/GPG key authorization remains unchanged.
 Removing this deployment cannot restore the earlier persistent sensor key.
 
 ## Preparation and offline checks

@@ -92,9 +92,12 @@ sudo -- /usr/bin/python3 /etc/thinkpad-fingerprint-auth/restore.py --remove
 
 The helper accepts only the two known targets, validates saved hashes and refuses
 an active configuration changed after this installation. It restores both
-originals and deletes only the expected backup namespace. An interrupted restore
-can be retried while each file still matches its known before/after hash. Screen
-unlock and templates are preserved. If sudo cannot authorize, normal Polkit
+originals and deletes only the expected backup namespace. Before backup cleanup
+begins, an interrupted restore can be retried while each file still matches its
+known before/after hash and all backup entries remain intact. If interrupted
+during backup deletion, PAM files are already restored but leftover cleanup
+requires inspection; the exact-entry guard refuses an incomplete backup tree.
+Screen unlock and templates are preserved. If sudo cannot authorize, normal Polkit
 elevation can run this same helper with `pkexec`.
 
 Restore sudo/SDDM and disable the separate lock integration **before** removing

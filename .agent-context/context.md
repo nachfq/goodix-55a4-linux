@@ -643,3 +643,18 @@ Preserve biometric/runtime data and machine-specific backups outside Git.
 Commit dates remain current; group the existing corrected implementations by
 functional stage without recreating earlier failing versions or rewriting history.
 No PR creation, merge, further hardware trials or authentication changes requested.
+
+
+Incremental Git preparation completed: eleven signed Conventional Commits group
+Nix/build, TLS constructor/load, TLS flow, key preparation, capture, verification,
+private fprintd/inventory, host deployment, screen unlock, sudo/SDDM and consolidated
+project history. Earlier history and author dates were preserved. Per-stage
+isolated source checks passed; final237Python cases passed with19namespace-only
+cases covered by the separate33case deployment fixture. Four patch applicability/
+whitespace checks, publication file exclusions and Markdown file links passed.
+Fresh git-post-commit fine-tuning covered the13outgoing commits including the two
+older unpushed probe/build commits. It found PC-R1 (stale deployment status) and
+PC-R2 (restore retry claim included interrupted backup cleanup). Both are corrected
+in one bounded documentation follow-up; no code/runtime/PAM change or new reader
+trial. This review reused prior scoped reviews and is not a complete driver audit.
+Publication is authorized to origin/feature/sensor-probe; no PR or merge requested.
