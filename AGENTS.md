@@ -15,7 +15,7 @@ to the owner in Spanish unless asked otherwise.
   sensor changes, explain the exact operations and agree on their scope with the
   owner. Do not infer authorization for future stages from an earlier approval.
   Honor explicit authorizations already given in the conversation.
-- Current committed milestone: The bounded private capture implementation is available. The owner reported one108x88 image and successful close; no image is published.
+- Current committed milestone: Private enrollment and comparison are available, with owner-reported same/other outcomes; this does not establish accuracy.
   Do not infer authorization for later hardware, installation or authentication
   stages from this milestone. Do not run community installers. A device listing
   can activate installed fprintd through D-Bus; explain that effect.

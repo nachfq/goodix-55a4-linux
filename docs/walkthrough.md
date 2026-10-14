@@ -256,3 +256,11 @@ existing ignored sources/cached dependencies and preserve older source/build pin
 Build mode refuses existing outputs rather than deleting them. Capture runtime
 pins identify this local build; different binaries require review, not automatic
 pin updates. Shared Nix store retention remains a separate concern.
+
+## 14. Private enrollment and controlled verification
+
+The first image worked; standalone recognition now has owner-reported results. Read
+[the operation and owner-run instructions](private-verification.md).
+The owner completed right-index enrollment and reported same/other comparison
+results; that original experiment sequence remains documented for reference. Scripts 13, 15 and 16 prepare and
+check the host code offline; script 14 alone has explicit hardware modes.

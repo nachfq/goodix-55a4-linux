@@ -7,7 +7,7 @@ We will first audit the community implementation, understand the protocol, and
 measure its behavior. That evidence will guide whether to maintain a libfprint
 patch or develop the missing components.
 
-**Committed stage 5:** The bounded private capture implementation is available. The owner reported one108x88 image and successful close; no image is published.
+**Committed stage 6:** Private enrollment and comparison are available, with owner-reported same/other outcomes; this does not establish accuracy.
 
 ## Hands-on walkthrough
 
@@ -86,3 +86,4 @@ Review each component's license and preserve attribution before incorporating mo
 - [fix(tls): bound image retries and propagate completion errors](docs/tls-flow-fix.md)
 - [feat(provision): guard one-shot sensor key provisioning](docs/key-provisioning-test.md)
 - [feat(capture): bound private acquisition and record the first image](docs/private-capture.md)
+- [feat(verify): add private enrollment and controlled comparison](docs/private-verification.md)

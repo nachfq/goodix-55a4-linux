@@ -56,3 +56,19 @@ This retains LGPL notices from the driver authors named above and Benjamin Berg
 in the changed core device file. Read [the capture report](../docs/private-capture.md)
 for exact operations, host-only evidence, artifacts and limits. It does not
 provision a key, install a driver, demonstrate sensor capture or validate matching.
+
+## Fourth correction: template and verification safety
+
+`0004-goodix-verification-safety.patch` applies after 0003 in the separate
+`work/libfprint-verification-fixed` variant. It fixes SIGFM feature ownership,
+serialization cleanup, malformed-input handling, matcher guards and enrollment
+error transfer. Matching math, threshold 72 and 16 enrollment stages are unchanged.
+The earlier capture sources/artifacts remain preserved.
+
+This retains LGPL-2.1-or-later notices of Benjamin Berg and the SIGFM authors
+Matthieu CHARETTE and Natasha England-Elbro, among others in the affected core
+files. No whole driver/library is vendored. See [the experiment report](../docs/private-verification.md)
+and build script 15 for exact source/patch pins and scoped offline evidence.
+The patch checks themselves do not establish physical recognition. Subsequent
+owner-reported enrollment/verification and host integration are documented in
+the linked experiment report and the repository overview.

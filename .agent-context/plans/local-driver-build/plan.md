@@ -126,7 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: The bounded private capture implementation is available. The owner reported one108x88 image and successful close; no image is published.
-See [the stage report](../../../docs/private-capture.md).
+Current committed milestone: Private enrollment and comparison are available, with owner-reported same/other outcomes; this does not establish accuracy.
+See [the stage report](../../../docs/private-verification.md).
 No further hardware/installation/auth changes are authorized by this Git staging
 checkpoint. The complete chronological plan is published with the final integration.
