@@ -311,3 +311,11 @@ uses independent password and fingerprint lock PAM contexts. The new
 unlock remains available. No sudo/login/Polkit config or extra biometric test
 was performed in that delivery. The owner subsequently reported successful
 unlock with fingerprint and password.
+
+## 23. Use fingerprint for sudo and graphical login
+
+The separately requested [sudo/SDDM integration](sudo-login-integration.md) is
+configured with original password rules preserved, a closed-lid skip and a
+10-second fingerprint attempt. Existing autologin and encrypted disk startup
+remain unchanged. Private originals and the standalone script25 restore helper
+provide one-command reversal. No forced login restart or biometric test round.

@@ -65,7 +65,7 @@ Source inspected locally: Omarchy `4.0.4-1`, Quickshell `0.3.1-1`.
 
 The installed module `/usr/lib/security/pam_fprintd.so` was already present.
 Those initial checks established configuration. The owner subsequently reported
-successful screen unlock by both methods. See sudo/login integration (covered in a later commit: `sudo-login-integration.md`)
+successful screen unlock by both methods. See [sudo/login integration](sudo-login-integration.md)
 for the separately requested later PAM changes.
 
 ## Reversal

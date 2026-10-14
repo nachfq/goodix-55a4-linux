@@ -108,3 +108,9 @@ trusted installation path by this partial review.
 
 This commit series groups completed work by functional stage using corrected
 implementations; it does not recreate earlier failing code or authorize new trials.
+
+Sudo and SDDM fingerprint-first authentication are configured with original
+password rules retained. Private originals and the restoration helper are
+documented in [the integration report](../docs/sudo-login-integration.md).
+The owner reports fingerprint/password screen unlock works; disk encryption
+and autologin remain unchanged. No extra biometric rounds or Git PR requested.

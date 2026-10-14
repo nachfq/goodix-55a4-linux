@@ -294,7 +294,7 @@ series with appropriate error classification before authentication integration.
 Screen unlock was subsequently enabled with a separate PAM file; see
 [lock-screen integration](lock-screen-integration.md). Disable that integration
 before removing the driver. Also restore the subsequently enabled
-sudo/SDDM integration (covered in a later commit: `sudo-login-integration.md`). This controller does not
+[sudo/SDDM integration](sudo-login-integration.md). This controller does not
 own/remove these PAM files or their separate backup namespace.
 
 Finish the active operation and explicitly stop fprintd first if necessary. The

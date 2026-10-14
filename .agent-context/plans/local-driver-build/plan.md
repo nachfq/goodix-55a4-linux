@@ -126,7 +126,8 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: Omarchy screen fingerprint unlock is configured; the owner reported both fingerprint and password unlock worked.
-See [the stage report](../../../docs/lock-screen-integration.md).
-No further hardware/installation/auth changes are authorized by this Git staging
-checkpoint. The complete chronological plan is published with the final integration.
+Screen unlock is owner-confirmed with both methods. Sudo/SDDM fingerprint-first
+configuration and original password fallback are now documented in
+[the integration report](../../../docs/sudo-login-integration.md). No live
+sudo/SDDM outcome observed. Disk encryption/autologin remain unchanged;
+no further hardware rounds, boot changes or PR creation requested.

@@ -93,3 +93,11 @@ captures. Review full logs before sharing them.
 Only after evaluating results should we propose a maintainable installation and
 unlocking or sudo integration, with documented changes and recovery.
 Investigate passkeys and SSH/GPG key authorization as separate integrations.
+
+## Current integration checkpoint
+
+The earlier stages above record the original roadmap. The reader now has
+initial recognition evidence and owner-confirmed screen unlock; sudo/SDDM
+are configured with password fallback. See [the latest integration](sudo-login-integration.md).
+The owner declined further biometric rounds; the original sample proposal
+is not a current requirement.
