@@ -1,0 +1,3 @@
+# Preserve pinned unified-diff context and canonical third-party license bytes.
+patches/*.patch -whitespace
+LICENSES/libfprint-LGPL-2.1.txt -whitespace

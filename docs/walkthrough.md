@@ -122,6 +122,13 @@ it does not configure, compile, download, install, or access USB. Share its outp
 before starting the build. A missing
 dependency is a prerequisite to resolve together, not permission to install it.
 
+The assistant's host preflight found missing tools and an OpenCV version mismatch.
+The owner selected a contained Nix environment and delegated execution to the
+assistant. After explicit acquisition approval, its preflight and the first
+compilation passed; see [Nix setup](nix-build.md) and the [build trial](build-test.md).
+The baseline remains uninstalled and was not loaded in that build trial.
+The corrected variant subsequently passed the isolated load experiment below.
+
 Start reading at `plan()` for the operations, then `preflight()` and
 `check_inputs()` for the checks. The final calls to `step()` are the experiment;
 each prints its arguments and waits for Enter, without `eval`.
@@ -155,7 +162,26 @@ Meson writes generated build files and logs under ignored `work/`. Review any
 output before sharing; a successful compilation establishes that a library was
 built, not that it captures or recognizes fingerprints.
 
-## Pinned Nix dependencies and first build
+## 5. Test the isolated TLS error constructor
 
-Read [the environment](nix-build.md) and [build evidence](build-test.md).
-Nix supplies dependencies without installing the driver or changing fprintd.
+Read [scripts/05-test-tls-errors.py](../scripts/05-test-tls-errors.py) and
+[the correction trial](tls-error-fix.md). Default mode prints the plan; `--run`
+inside the existing Nix environment extracts and compiles only the actual error
+constructor with GLib/OpenSSL and a focused harness. The original reproduced an
+ASan heap overflow; seven fixed cases passed ASan/UBSan. This does not execute
+the complete driver or a TLS handshake.
+
+## 6. Load the corrected library without a reader
+
+Read [scripts/06-load-library.py](../scripts/06-load-library.py), starting at
+`plan()`, then `sandbox_command()` and the small internal helper. From a normal
+terminal, `python3 scripts/06-load-library.py --plan` only explains the operations.
+Explicit `--run` requires the existing Nix Python and bubblewrap; it verifies the
+exact artifact and executes a child with no host USB, D-Bus, network or home
+access. The child loads the library and checks three GType names without creating
+objects. It stops on isolation failure, with no host fallback.
+
+The assistant executed this separately authorized experiment successfully;
+see [the trial](library-load-test.md) for the exact command, failed initial attempt,
+final outcome and limits. No reader was opened. This is a library-loading test,
+not a sensor or fingerprint test.

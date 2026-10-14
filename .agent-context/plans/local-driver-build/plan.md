@@ -126,7 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: The pinned Nix dependency environment and first local compilation are documented. This is build evidence, not reader support.
-See [the stage report](../../../docs/nix-build.md).
+Current committed milestone: TLS error construction is corrected; an isolated library load resolved dependencies and basic types without USB access.
+See [the stage report](../../../docs/tls-error-fix.md).
 No further hardware/installation/auth changes are authorized by this Git staging
 checkpoint. The complete chronological plan is published with the final integration.

@@ -15,7 +15,7 @@ to the owner in Spanish unless asked otherwise.
   sensor changes, explain the exact operations and agree on their scope with the
   owner. Do not infer authorization for future stages from an earlier approval.
   Honor explicit authorizations already given in the conversation.
-- Current committed milestone: The pinned Nix dependency environment and first local compilation are documented. This is build evidence, not reader support.
+- Current committed milestone: TLS error construction is corrected; an isolated library load resolved dependencies and basic types without USB access.
   Do not infer authorization for later hardware, installation or authentication
   stages from this milestone. Do not run community installers. A device listing
   can activate installed fprintd through D-Bus; explain that effect.

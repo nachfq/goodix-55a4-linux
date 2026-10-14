@@ -16,6 +16,8 @@ import unittest
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/04-build-local.sh"
 BASE_COMMIT = "d1ca62a801aa565e67d1a2a47aaa7a33232b7990"
 PATCH_HASH = "73720a4418ed7ceb640011f51d4f2bac206118bc480ab6f1784f6618b479ef15"
+FIX_PATCH_HASH = "d3187cbc8c86a3a6881411428e781be9b4a90de68f7a3ae822e1e183bb5594b7"
+COMBINED_DIFF_HASH = "aaa19320440568ba9d7a9622f1c50a47c2262f2e484e1e74e6745445a3acfb16"
 DIFF_ARGS = [
     "-c", "diff.algorithm=myers", "-c", "diff.indentHeuristic=true",
     "-c", "diff.suppressBlankEmpty=false", "diff", "--no-ext-diff",
@@ -74,6 +76,9 @@ class BuildLocalTests(unittest.TestCase):
         self.base = self.repo / "work/libfprint"
         self.source = self.repo / "work/libfprint-patched"
         self.build = self.repo / "work/libfprint-build"
+        self.fixed_source = self.repo / "work/libfprint-tls-fixed"
+        self.fixed_build = self.repo / "work/libfprint-tls-fixed-build"
+        self.fix_patch = self.repo / "patches/0001-goodixtls-safe-errors.patch"
         self.calls = self.repo / "calls.jsonl"
         self.base.mkdir(parents=True)
         self.git(self.repo, "init", "-q", "--template=")
@@ -89,8 +94,20 @@ class BuildLocalTests(unittest.TestCase):
         patch = self.git(self.source, *DIFF_ARGS).encode()
         (self.repo / "work/55a4-driver.patch").write_bytes(patch)
         patch_hash = hashlib.sha256(patch).hexdigest()
+        self.git(self.base, "worktree", "add", "--detach", "-q", str(self.fixed_source), "HEAD")
+        self.git(self.fixed_source, "apply", str(self.repo / "work/55a4-driver.patch"))
+        self.git(self.fixed_source, "add", "driver.c")
+        (self.fixed_source / "driver.c").write_text("reviewed synthetic patch\nreviewed TLS error fix\n")
+        # The incremental fix compares against the staged community patch; the
+        # complete diff against HEAD must cover both staged and unstaged changes.
+        fix_patch = self.git(self.fixed_source, *DIFF_ARGS[:-1]).encode()
+        self.fix_patch.parent.mkdir()
+        self.fix_patch.write_bytes(fix_patch)
+        fix_hash = hashlib.sha256(fix_patch).hexdigest()
+        combined_hash = hashlib.sha256(self.git(self.fixed_source, *DIFF_ARGS).encode()).hexdigest()
         # Substitute pins in a temporary script copy; the production pins stay fixed.
-        script_text = SCRIPT.read_text().replace(BASE_COMMIT, commit).replace(PATCH_HASH, patch_hash)
+        script_text = (SCRIPT.read_text().replace(BASE_COMMIT, commit).replace(PATCH_HASH, patch_hash)
+                       .replace(FIX_PATCH_HASH, fix_hash).replace(COMBINED_DIFF_HASH, combined_hash))
         scripts = self.repo / "scripts"
         scripts.mkdir()
         self.script = scripts / SCRIPT.name
@@ -115,18 +132,21 @@ class BuildLocalTests(unittest.TestCase):
                                          GIT_CONFIG_GLOBAL=os.devnull))
         return result.stdout
 
-    def run_mode(self, mode="--check-dependencies"):
-        return subprocess.run(["/usr/bin/bash", str(self.script), mode], env=self.env,
+    def run_mode(self, mode="--check-dependencies", *args):
+        return subprocess.run(["/usr/bin/bash", str(self.script), mode, *args], env=self.env,
                               capture_output=True, text=True, timeout=10)
 
     def recorded(self):
         return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
 
-    def run_interactive(self, interrupt=False, eof=False):
+    def run_interactive(self, interrupt=False, eof=False, tls_error_fix=False):
         if os.geteuid() == 0:
             self.skipTest("Interactive success/failure checks need a regular user; root refusal is tested separately")
         master, slave = pty.openpty()
-        proc = subprocess.Popen(["/usr/bin/bash", str(self.script), "--run"],
+        args = ["/usr/bin/bash", str(self.script), "--run"]
+        if tls_error_fix:
+            args.append("--tls-error-fix")
+        proc = subprocess.Popen(args,
                                 stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 env=self.env)
         os.close(slave)
@@ -175,6 +195,67 @@ class BuildLocalTests(unittest.TestCase):
         self.assertFalse(any(call[0] in ("ninja", "readelf") or call[1:2] == ["setup"]
                              for call in self.recorded()))
         self.assertEqual(self.git(self.base, "status", "--porcelain"), "")
+
+    def test_tls_fix_plan_selects_separate_inputs_and_executes_no_tools(self):
+        result = self.run_mode("--plan", "--tls-error-fix")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Selected variant: community baseline plus TLS error fix", result.stdout)
+        for path in (self.fixed_source, self.fixed_build, self.fix_patch):
+            self.assertIn(str(path), result.stdout)
+        self.assertIn("Community patch SHA-256:", result.stdout)
+        self.assertIn("TLS error-fix patch SHA-256:", result.stdout)
+        self.assertIn("Canonical assembled diff against base HEAD SHA-256:", result.stdout)
+        self.assertEqual(self.recorded(), [])
+        self.assertFalse(self.fixed_build.exists())
+
+    def test_tls_fix_check_preserves_outputs_and_requires_fresh_selected_output(self):
+        self.build.mkdir()
+        sentinel = self.build / "keep.txt"
+        sentinel.write_text("baseline artifact")
+        result = self.run_mode("--check-dependencies", "--tls-error-fix")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sentinel.read_text(), "baseline artifact")
+        self.assertFalse(self.fixed_build.exists())
+        self.assertFalse(any(call[0] in ("ninja", "readelf") or call[1:2] == ["setup"]
+                             for call in self.recorded()))
+        self.fixed_build.mkdir()
+        fixed_sentinel = self.fixed_build / "keep.txt"
+        fixed_sentinel.write_text("previous fixed artifact")
+        result = self.run_mode("--check-dependencies", "--tls-error-fix")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Output already exists: " + str(self.fixed_build), result.stderr)
+        self.assertEqual(fixed_sentinel.read_text(), "previous fixed artifact")
+        self.assertEqual(sentinel.read_text(), "baseline artifact")
+
+    def test_tls_fix_rejects_damaged_patch_and_combined_source(self):
+        cases = [(self.fix_patch, "TLS error-fix patch SHA-256"),
+                 (self.fixed_source / "driver.c", "exact reviewed combined diff")]
+        for path, message in cases:
+            with self.subTest(path=path):
+                original = path.read_bytes()
+                path.write_bytes(original + b"unexpected change\n")
+                result = self.run_mode("--check-dependencies", "--tls-error-fix")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(self.fixed_build.exists())
+                self.assertFalse(any(call[0] == "ninja" or call[1:2] == ["setup"]
+                                     for call in self.recorded()))
+                path.write_bytes(original)
+
+    def test_baseline_does_not_require_the_optional_fix_patch(self):
+        self.fix_patch.unlink()
+        result = self.run_mode()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unknown_modes_selectors_and_extra_arguments_fail_before_tools(self):
+        for args in (("--unknown",), ("--tls-error-fix",), ("--plan", "--unknown"),
+                     ("--plan", "--tls-error-fix", "--unknown")):
+            with self.subTest(args=args):
+                result = self.run_mode(*args)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(self.recorded(), [])
+                self.assertFalse(self.build.exists())
+                self.assertFalse(self.fixed_build.exists())
 
     def test_missing_tool_and_metadata_are_reported_without_building(self):
         (self.bindir / "c++").unlink()
@@ -288,6 +369,22 @@ class BuildLocalTests(unittest.TestCase):
         self.assertEqual([call[0] for call in calls[-2:]], ["ninja", "readelf"])
         self.assertIn("no installation or hardware test", output)
         self.assertEqual(self.git(self.base, "status", "--porcelain"), "")
+
+    def test_enter_steps_tls_fix_build_only_selected_worktree_and_output(self):
+        self.build.mkdir()
+        sentinel = self.build / "keep.txt"
+        sentinel.write_text("baseline artifact")
+        status, output = self.run_interactive(tls_error_fix=True)
+        self.assertEqual(status, 0, output)
+        calls = self.recorded()
+        setup = next(call for call in calls if call[:2] == ["meson", "setup"])
+        self.assertEqual(setup[2:4], [str(self.fixed_build), str(self.fixed_source)])
+        self.assertEqual([call for call in calls if call[0] == "ninja"],
+                         [["ninja", "-C", str(self.fixed_build), "libfprint/libfprint-2.so.2.0.0"]])
+        self.assertEqual([call for call in calls if call[0] == "readelf"],
+                         [["readelf", "-d", str(self.fixed_build / "libfprint/libfprint-2.so.2.0.0")]])
+        self.assertEqual(sentinel.read_text(), "baseline artifact")
+        self.assertTrue((self.fixed_build / "libfprint/libfprint-2.so.2.0.0").is_file())
 
     def test_interruption_before_first_step_runs_no_tools(self):
         status, output = self.run_interactive(interrupt=True)

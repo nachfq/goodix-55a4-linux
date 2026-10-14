@@ -6,7 +6,7 @@ dependency acquisition and compilation, excluding driver installation and sensor
 access. This is not a biometric or runtime compatibility test.
 
 The TLS constructor defects recorded below were subsequently addressed by
-a separate local correction and regression trial (covered in a later commit: `tls-error-fix.md`).
+[a separate local correction and regression trial](tls-error-fix.md).
 This report describes the unchanged community baseline.
 
 ## Inputs and dependency setup

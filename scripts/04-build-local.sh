@@ -3,14 +3,19 @@
 set -Eeuo pipefail
 
 mode=${1:---plan}
-if (( $# > 1 )); then
-    echo 'Usage: bash scripts/04-build-local.sh [--plan|--check-dependencies|--run]' >&2
+if (( $# > 2 )); then
+    echo 'Usage: bash scripts/04-build-local.sh [--plan|--check-dependencies|--run] [--tls-error-fix]' >&2
     exit 2
 fi
 case "$mode" in
     --plan|--help|--check-dependencies|--run) ;;
     *) echo "Unknown mode: $mode" >&2; exit 2 ;;
 esac
+tls_error_fix=false
+if (( $# == 2 )); then
+    [[ "$2" == --tls-error-fix ]] || { echo "Unknown selector: $2" >&2; exit 2; }
+    tls_error_fix=true
+fi
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 base="$repo_dir/work/libfprint"
@@ -19,6 +24,22 @@ patch_file="$repo_dir/work/55a4-driver.patch"
 build_dir="$repo_dir/work/libfprint-build"
 expected_commit=d1ca62a801aa565e67d1a2a47aaa7a33232b7990
 expected_hash=73720a4418ed7ceb640011f51d4f2bac206118bc480ab6f1784f6618b479ef15
+expected_diff_hash=$expected_hash
+variant='community baseline'
+diff_description=patch
+fix_patch_file="$repo_dir/patches/0001-goodixtls-safe-errors.patch"
+expected_fix_hash=d3187cbc8c86a3a6881411428e781be9b4a90de68f7a3ae822e1e183bb5594b7
+fix_patch_inputs=''
+if "$tls_error_fix"; then
+    source_dir="$repo_dir/work/libfprint-tls-fixed"
+    build_dir="$repo_dir/work/libfprint-tls-fixed-build"
+    expected_diff_hash=aaa19320440568ba9d7a9622f1c50a47c2262f2e484e1e74e6745445a3acfb16
+    variant='community baseline plus TLS error fix'
+    diff_description='combined diff'
+    fix_patch_inputs="  TLS error-fix patch: $fix_patch_file
+  TLS error-fix patch SHA-256: $expected_fix_hash
+"
+fi
 # Read-only Git operations must not refresh the index or run fsmonitor hooks.
 export GIT_OPTIONAL_LOCKS=0
 
@@ -28,17 +49,20 @@ git_read() {
 
 plan() {
     cat <<PLAN
-Usage: bash scripts/04-build-local.sh [--plan|--check-dependencies|--run]
+Usage: bash scripts/04-build-local.sh [--plan|--check-dependencies|--run] [--tls-error-fix]
 Default: show this plan only. --check-dependencies inspects tools, pkg-config
 metadata, pinned local inputs, and the intended output path; it configures nothing.
+Selected variant: $variant. --tls-error-fix selects the separate fixed worktree.
 
 Inputs (already downloaded; no acquisition or repair):
   Clean base: $base
   Patched worktree: $source_dir
   Base HEAD: $expected_commit
-  Patch: $patch_file
-  Patch and canonical assembled diff SHA-256: $expected_hash
+  Community patch: $patch_file
+  Community patch SHA-256: $expected_hash
+${fix_patch_inputs}  Canonical assembled diff against base HEAD SHA-256: $expected_diff_hash
 Fresh ignored output: $build_dir (must not exist, even after a failed build).
+Worktrees must already be assembled; this script does not apply patches.
 
 Required tools: Git, sha256sum, cc, c++, Meson >=0.56.0, Ninja, Python3,
 pkg-config, glib-mkenums, readelf (static inspection).
@@ -141,6 +165,11 @@ check_inputs() {
     [[ -f "$patch_file" ]] || stop "Missing patch: $patch_file"
     digest=$(sha256sum "$patch_file")
     [[ ${digest%% *} == "$expected_hash" ]] || stop 'Patch SHA-256 differs from the reviewed input.'
+    if "$tls_error_fix"; then
+        [[ -f "$fix_patch_file" ]] || stop "Missing TLS error-fix patch: $fix_patch_file"
+        digest=$(sha256sum "$fix_patch_file")
+        [[ ${digest%% *} == "$expected_fix_hash" ]] || stop 'TLS error-fix patch SHA-256 differs from the reviewed input.'
+    fi
     # This canonical diff covers staged AND unstaged tracked changes against HEAD.
     # pipefail prevents a failed Git command from looking like a valid empty diff.
     digest=$(git_read -C "$source_dir" -c diff.algorithm=myers \
@@ -148,7 +177,7 @@ check_inputs() {
         diff --no-ext-diff --no-textconv --no-renames --no-color \
         --src-prefix=a/ --dst-prefix=b/ --unified=3 --inter-hunk-context=0 \
         --abbrev=7 HEAD | sha256sum)
-    [[ ${digest%% *} == "$expected_hash" ]] || stop 'Patched source differs from the exact reviewed patch.'
+    [[ ${digest%% *} == "$expected_diff_hash" ]] || stop "Patched source differs from the exact reviewed $diff_description."
     echo 'Pinned base, patch bytes, and assembled tracked changes match; no source modified.'
 }
 

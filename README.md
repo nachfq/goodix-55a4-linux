@@ -7,7 +7,7 @@ We will first audit the community implementation, understand the protocol, and
 measure its behavior. That evidence will guide whether to maintain a libfprint
 patch or develop the missing components.
 
-**Committed stage 1:** The pinned Nix dependency environment and first local compilation are documented. This is build evidence, not reader support.
+**Committed stage 2:** TLS error construction is corrected; an isolated library load resolved dependencies and basic types without USB access.
 
 ## Hands-on walkthrough
 
@@ -82,3 +82,4 @@ Review each component's license and preserve attribution before incorporating mo
 ## Implemented follow-up stages
 
 - [build(nix): pin dependencies and record the first local build](docs/nix-build.md)
+- [fix(tls): harden error construction and isolate library loading](docs/tls-error-fix.md)
