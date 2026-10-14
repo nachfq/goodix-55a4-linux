@@ -126,7 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: Private native fprintd sessions now have owner-reported detection, enrollment, sameMATCH and otherNO_MATCH. Host authentication is separate.
-See [the stage report](../../../docs/private-fprintd.md).
+Current committed milestone: The contained host deployment is installed; normal CLI detection, enrollment, sameMATCH and otherCLI-NO_MATCH are documented with their limits.
+See [the stage report](../../../docs/host-deployment.md).
 No further hardware/installation/auth changes are authorized by this Git staging
 checkpoint. The complete chronological plan is published with the final integration.

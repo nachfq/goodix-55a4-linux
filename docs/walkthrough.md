@@ -283,3 +283,21 @@ state checks passing (Test014). One declared-same native MATCH is owner-reported
 (Test015), followed by one declared-other NO_MATCH (Test016). This completes the
 initial contained native experiment. Agree on the next scope before installation
 or host-service/authentication integration.
+
+## 21. Prepare a contained host deployment
+
+The owner accepted preparing installation/removal after the native same/other
+reports. Read [the exact files, effects and rollback](host-deployment.md).
+Script21 prepares only the ignored frozen bundle; script22 defaults to a plan
+and has separate explicit privileged install/remove actions. Scripts23/24 check
+relocated loading/unit syntax and disposable-root filesystem transactions.
+Those checks passed without installing or accessing hardware. The bundle is
+reviewed and was then installed with separate owner acceptance. Normal-host
+`fprintd-list` exposed one reader (Test017), with no host prints enrolled yet.
+A subsequent owner-authorized host enrollment completed successfully and
+`fprintd-list` confirmed `right-index-finger` (Test018). The proper native CLI
+finger name is `right-index-finger`. A separately accepted declared-same host
+verification then reported `verify-match`/exit0 (Test019). The next accepted
+declared-other trial reported `verify-no-match`/exit1 (Test020); normal CLI
+NO_MATCH can mask internal errors, so it does not provide the private observer
+rejection guarantee. The owner accepted the trials and declined further rounds.

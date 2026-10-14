@@ -15,7 +15,7 @@ to the owner in Spanish unless asked otherwise.
   sensor changes, explain the exact operations and agree on their scope with the
   owner. Do not infer authorization for future stages from an earlier approval.
   Honor explicit authorizations already given in the conversation.
-- Current committed milestone: Private native fprintd sessions now have owner-reported detection, enrollment, sameMATCH and otherNO_MATCH. Host authentication is separate.
+- Current committed milestone: The contained host deployment is installed; normal CLI detection, enrollment, sameMATCH and otherCLI-NO_MATCH are documented with their limits.
   Do not infer authorization for later hardware, installation or authentication
   stages from this milestone. Do not run community installers. A device listing
   can activate installed fprintd through D-Bus; explain that effect.
