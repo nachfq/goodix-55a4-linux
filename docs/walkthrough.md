@@ -239,3 +239,20 @@ Preparation executed no key write or capture. The owner subsequently ran the
 authorized script and reported MISMATCH-to-MATCH; see [Test 003](key-provisioning-test.md).
 That is immediate key-state evidence, not fingerprint support or recovery proof.
 The successful write need not be repeated.
+
+## 9. Prepare and read the standalone image experiment
+
+The owner authorized host safety corrections and preparation after the one-shot
+key result. Read [the operation/evidence report](private-capture.md) and
+[`10-capture-one.py`](../scripts/10-capture-one.py). The default `--plan` and
+`--check-inputs` open no device. Hardware `--run` is a separate typed-confirmation
+step with exact reset/configuration/TLS/capture/sleep effects described in the
+report; it was not executed during preparation. Do not repeat provisioning.
+
+Offline-only helpers are [`09-test-capture-safety.py`](../scripts/09-test-capture-safety.py),
+[`11-build-capture.py`](../scripts/11-build-capture.py) and
+[`12-test-capture-runtime.py`](../scripts/12-test-capture-runtime.py). They use
+existing ignored sources/cached dependencies and preserve older source/build pins.
+Build mode refuses existing outputs rather than deleting them. Capture runtime
+pins identify this local build; different binaries require review, not automatic
+pin updates. Shared Nix store retention remains a separate concern.

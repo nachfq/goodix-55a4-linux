@@ -126,7 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: Guarded one-shot key provisioning is available. The owner reported immediate MISMATCH-to-MATCH; original-key recovery is unproven.
-See [the stage report](../../../docs/key-provisioning-test.md).
+Current committed milestone: The bounded private capture implementation is available. The owner reported one108x88 image and successful close; no image is published.
+See [the stage report](../../../docs/private-capture.md).
 No further hardware/installation/auth changes are authorized by this Git staging
 checkpoint. The complete chronological plan is published with the final integration.

@@ -100,6 +100,7 @@ trusted installation path by this partial review.
 - TLS error construction is corrected; an isolated library load resolved dependencies and basic types without USB access. See [stage report](../docs/tls-error-fix.md).
 - TLS activation findings and the image retry/completion correction are documented with offline regression evidence. See [stage report](../docs/tls-flow-fix.md).
 - Guarded one-shot key provisioning is available. The owner reported immediate MISMATCH-to-MATCH; original-key recovery is unproven. See [stage report](../docs/key-provisioning-test.md).
+- The bounded private capture implementation is available. The owner reported one108x88 image and successful close; no image is published. See [stage report](../docs/private-capture.md).
 
 This commit series groups completed work by functional stage using corrected
 implementations; it does not recreate earlier failing code or authorize new trials.

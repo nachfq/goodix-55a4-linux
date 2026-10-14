@@ -1,0 +1,1558 @@
+diff --git a/libfprint/drivers/goodixtls/goodix.c b/libfprint/drivers/goodixtls/goodix.c
+index 7e51770..40f63f2 100644
+--- a/libfprint/drivers/goodixtls/goodix.c
++++ b/libfprint/drivers/goodixtls/goodix.c
+@@ -23,6 +23,7 @@
+ #define FP_COMPONENT "goodixtls"
+ 
+ #include <gio/gio.h>
++#include <errno.h>
+ #include <glib.h>
+ #include <gusb.h>
+ #include <openssl/ssl.h>
+@@ -55,6 +56,13 @@ typedef struct
+   GoodixCallbackInfo *tls_ready_callback;
+   FpiSsm            *tls_ssm;
+   GSource           *tls_poll;
++  GSource           *tls_socket_poll;
++  gint64             tls_deadline;
++  GSource           *image_poll;
++  GoodixCallbackInfo *image_callback;
++  guint8            *image_buffer;
++  guint              image_length;
++  gint64             image_deadline;
+ 
+   GCancellable       *transfer_cancel_tkn;
+   gboolean            inited;
+@@ -63,6 +71,8 @@ typedef struct
+      pattern of the working pyusb reference and the Windows driver. Stacked or
+      pre-command IN URBs make the 55a4 fw answer GET_IMAGE with 0xd0. */
+   gboolean            read_pending;
++  guint               read_generation;
++  guint               command_timeout_ms;
+ 
+   /* "Obey 0xd0": when the fw answers GET_IMAGE with REQUEST_TLS_CONNECTION,
+      comply — re-establish TLS and retry the image request. These hold the
+@@ -105,7 +115,10 @@ goodix_receive_done (FpDevice *dev, guint8 *data, guint16 length,
+   gpointer user_data = priv->user_data;
+ 
+   if (!(priv->ack || priv->reply))
+-    return;
++    {
++      g_clear_error (&error);
++      return;
++    }
+ 
+   if (priv->cmd == GOODIX_CMD_MCU_GET_IMAGE)
+     priv->reimage_tries = 0;
+@@ -430,6 +443,12 @@ goodix_receive_pack (FpDevice *dev, guint8 *data, guint32 length)
+   guint16 payload_len;
+   gboolean valid_checksum; // TODO implement checksum.
+ 
++  if (length > 65539 || priv->length > 65539 - length)
++    {
++      goodix_receive_done (dev, NULL, 0, g_error_new_literal (
++        G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "USB packet exceeds bounded frame size"));
++      return;
++    }
+   priv->data = g_realloc (priv->data, priv->length + length);
+   memcpy (priv->data + priv->length, data, length);
+   priv->length += length;
+@@ -442,6 +461,13 @@ goodix_receive_pack (FpDevice *dev, guint8 *data, guint32 length)
+       return;
+     }
+ 
++  if (!valid_checksum)
++    {
++      goodix_receive_done (dev, NULL, 0, g_error_new_literal (
++        G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "USB packet checksum is invalid"));
++      return;
++    }
++
+   switch (flags)
+     {
+     case GOODIX_FLAGS_MSG_PROTOCOL:
+@@ -460,8 +486,12 @@ goodix_receive_pack (FpDevice *dev, guint8 *data, guint32 length)
+     case GOODIX_FLAGS_TLS_DATA:
+         fp_dbg("Got TLS data msg");
+         priv->reimage_tries = 0;
+-        // GOODIX 55x4: Remove first 9 to get valid TLS content
+-        goodix_receive_done(dev, payload+9, payload_len-9, NULL);
++        // GOODIX 55x4: Remove first 9 to get valid TLS content.
++        if (payload_len < 9)
++          goodix_receive_done (dev, NULL, 0, g_error_new_literal (
++            G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Truncated encrypted image header"));
++        else
++          goodix_receive_done(dev, payload+9, payload_len-9, NULL);
+         break;
+ 
+     default:
+@@ -509,25 +539,22 @@ goodix_receive_data_cb (FpiUsbTransfer *transfer, FpDevice *dev,
+     fpi_device_goodixtls_get_instance_private (self);
+ 
+   priv->read_pending = FALSE;
+-
+-  if (g_cancellable_is_cancelled (priv->transfer_cancel_tkn))
++  if (GPOINTER_TO_UINT (user_data) != priv->read_generation)
+     {
+-      fp_dbg ("transfer cancelled, aborting read loop...");
++      g_clear_error (&error);
++      if (priv->inited && (priv->ack || priv->reply))
++        goodix_receive_data (dev);
+       return;
+     }
++
++  if (g_cancellable_is_cancelled (priv->transfer_cancel_tkn) && !error)
++    error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED,
++                                 "USB receive cancelled");
+   if (error)
+     {
+-      // Warn about error and free it.
+-      fp_warn ("Receive data error: %s", error->message);
+-      g_error_free (error);
+-
+-      // Retry only while a command is still waiting for data. Re-arming
+-      // unconditionally re-creates the perpetual bulk-IN read this driver
+-      // deliberately removed, and on a disappearing device it becomes a
+-      // self-feeding error loop: every failed transfer immediately submits
+-      // another one.
+-      if (priv->ack || priv->reply)
+-        goodix_receive_data (dev);
++      /* A persistent transport failure is not an instruction to resubmit.
++       * The command owner receives the original timeout/cancellation/error. */
++      goodix_receive_done (dev, NULL, 0, error);
+       return;
+     }
+ 
+@@ -551,6 +578,11 @@ goodix_receive_timeout_cb (FpDevice *dev, gpointer user_data)
+     fpi_device_goodixtls_get_instance_private (self);
+   GError *error = NULL;
+ 
++  /* The old URB must finish before a newly started command reads. Its
++   * generation will be discarded, preventing old bytes/errors reaching new SSMs. */
++  g_cancellable_cancel (priv->transfer_cancel_tkn);
++  g_clear_object (&priv->transfer_cancel_tkn);
++  priv->transfer_cancel_tkn = g_cancellable_new ();
+   g_set_error (&error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+                "Command timed out: 0x%02x", priv->cmd);
+   goodix_receive_done (dev, NULL, 0, error);
+@@ -598,8 +630,9 @@ goodix_receive_data (FpDevice *dev)
+   fpi_usb_transfer_fill_bulk (transfer, class->ep_in,
+                               GOODIX_EP_IN_MAX_BUF_SIZE);
+ 
+-  fpi_usb_transfer_submit (transfer, 0, priv->transfer_cancel_tkn,
+-                           goodix_receive_data_cb, NULL);
++  fpi_usb_transfer_submit (transfer, priv->command_timeout_ms,
++                           priv->transfer_cancel_tkn, goodix_receive_data_cb,
++                           GUINT_TO_POINTER (priv->read_generation));
+ }
+ 
+ // ---- GOODIX RECEIVE SECTION END ----
+@@ -681,18 +714,26 @@ goodix_send_protocol (
+ 
+   if (priv->ack || priv->reply || priv->timeout)
+     {
+-      // A command is already running.
+-      fp_warn ("A command is already running: 0x%02x", priv->cmd);
++      /* Reject the new caller without clearing the outstanding command. */
+       if (free_func)
+         free_func (payload);
++      error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_BUSY,
++                                    "Another sensor command is pending");
++      if (callback)
++        callback (dev, NULL, 0, user_data, error);
++      else
++        g_clear_error (&error);
+       return;
+     }
+ 
+   fp_dbg ("Running command: 0x%02x", cmd);
+ 
+-  if (timeout_ms)
+-    priv->timeout = fpi_device_add_timeout (
+-      dev, timeout_ms, goodix_receive_timeout_cb, NULL, NULL);
++  if (!timeout_ms)
++    timeout_ms = (cmd == GOODIX_CMD_MCU_SWITCH_TO_FDT_DOWN ||
++                  cmd == GOODIX_CMD_MCU_SWITCH_TO_FDT_UP) ? 15000 : GOODIX_TIMEOUT;
++  priv->command_timeout_ms = timeout_ms;
++  priv->timeout = fpi_device_add_timeout (
++    dev, timeout_ms, goodix_receive_timeout_cb, NULL, NULL);
+   priv->cmd = cmd;
+   priv->ack = TRUE;
+   priv->reply = reply;
+@@ -720,26 +761,30 @@ void
+ goodix_send_nop (FpDevice *dev, GoodixNoneCallback callback,
+                  gpointer user_data)
+ {
+-  GoodixNop payload = {.unknown = 0x00000000};
+-  GoodixCallbackInfo *cb_info;
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  GoodixNop payload = {.unknown = 0};
++  GError *error = NULL;
++  guint8 *data;
++  guint32 length;
+ 
+-  if (callback)
++  if (priv->ack || priv->reply || priv->timeout)
++    error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_BUSY,
++                                 "Another sensor command is pending");
++  else
+     {
+-      cb_info = malloc (sizeof (GoodixCallbackInfo));
+-
+-      cb_info->callback = G_CALLBACK (callback);
+-      cb_info->user_data = user_data;
+-
+-    goodix_send_protocol(dev, GOODIX_CMD_NOP, (guint8 *)&payload,
+-                         sizeof(payload), NULL, FALSE, 0, FALSE,
+-                         goodix_receive_none, cb_info);
+-    goodix_receive_done(dev, NULL, 0, NULL);
+-    return;
+-  }
+-
+-  goodix_send_protocol(dev, GOODIX_CMD_NOP, (guint8 *)&payload, sizeof(payload),
+-                       NULL, FALSE, GOODIX_TIMEOUT, FALSE, NULL, NULL);
+-  goodix_receive_done(dev, NULL, 0, NULL);
++      /* NOP may have no response. It must not submit an IN read that could
++       * consume the next command's ACK and then be discarded as stale. */
++      goodix_encode_protocol (GOODIX_CMD_NOP, (guint8 *) &payload, sizeof (payload),
++                              FALSE, FALSE, &data, &length);
++      if (!goodix_send_pack (dev, GOODIX_FLAGS_MSG_PROTOCOL, data, length, g_free, &error) &&
++          !error)
++        error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED, "NOP send failed");
++    }
++  if (callback)
++    callback (dev, user_data, error);
++  else
++    g_clear_error (&error);
+ }
+ 
+ void goodix_send_drv_state(FpDevice *dev, GoodixSuccessCallback callback,
+@@ -1265,7 +1310,7 @@ goodix_send_request_tls_connection (FpDevice             *dev,
+       cb_info->user_data = user_data;
+ 
+       goodix_send_protocol (dev, GOODIX_CMD_REQUEST_TLS_CONNECTION,
+-                            (guint8 *) &payload, sizeof (payload), NULL, TRUE, 0,
++                            (guint8 *) &payload, sizeof (payload), NULL, TRUE, GOODIX_TIMEOUT,
+                             TRUE, goodix_receive_default, cb_info);
+       return;
+     }
+@@ -1415,9 +1460,12 @@ goodix_dev_init (FpDevice *dev, GError **error)
+   priv->data = NULL;
+   priv->length = 0;
+   priv->read_pending = FALSE;
++  priv->read_generation++;
++  priv->command_timeout_ms = GOODIX_TIMEOUT;
+   priv->reimage_callback = NULL;
+   priv->reimage_user_data = NULL;
+   priv->reimage_tries = 0;
++  g_clear_object (&priv->transfer_cancel_tkn);
+   priv->transfer_cancel_tkn = g_cancellable_new ();
+ 
+   return g_usb_device_claim_interface (fpi_device_get_usb_device (dev),
+@@ -1436,6 +1484,9 @@ goodix_reset_state (FpDevice *dev)
+   priv->reply = FALSE;
+   priv->callback = NULL;
+   priv->user_data = NULL;
++  priv->read_generation++;
++  g_clear_pointer (&priv->data, g_free);
++  priv->length = 0;
+   /* The image recovery budget survives handshake command completion. */
+ }
+ 
+@@ -1461,7 +1512,8 @@ goodix_dev_deinit (FpDevice *dev, GError **error)
+   // GLib catches that as "g_source_destroy: assertion 'ref_count > 0' failed"
+   // on every close that had a command in flight.
+   g_clear_pointer (&priv->timeout, g_source_destroy);
+-  g_free (priv->data);
++  g_clear_pointer (&priv->data, g_free);
++  priv->length = 0;
+   g_cancellable_cancel (priv->transfer_cancel_tkn);
+   goodix_shutdown_tls (dev, error);
+ 
+@@ -1487,6 +1539,7 @@ goodix_tls_finish (FpDevice *dev, GError *error)
+     FPI_DEVICE_GOODIXTLS (dev));
+   GoodixCallbackInfo *info = g_steal_pointer (&priv->tls_ready_callback);
+   g_clear_pointer (&priv->tls_poll, g_source_destroy);
++  g_clear_pointer (&priv->tls_socket_poll, g_source_destroy);
+   if (!info)
+     {
+       g_clear_error (&error);
+@@ -1520,6 +1573,9 @@ goodix_read_tls (FpDevice *dev, GoodixTlsCallback callback,
+   priv->user_data = user_data;
+   priv->reply = TRUE;
+   priv->cmd = 0;
++  priv->command_timeout_ms = GOODIX_TIMEOUT;
++  priv->timeout = fpi_device_add_timeout (dev, GOODIX_TIMEOUT,
++                                         goodix_receive_timeout_cb, NULL, NULL);
+ 
+   /* On-demand read model: issue the IN read for this TLS handshake message now
+      (no perpetually-pending read loop). */
+@@ -1596,6 +1652,7 @@ tls_handshake_done (FpiSsm *ssm, FpDevice *dev, GError *error)
+   FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
+     FPI_DEVICE_GOODIXTLS (dev));
+   priv->tls_ssm = NULL;
++  g_clear_pointer (&priv->tls_socket_poll, g_source_destroy);
+   if (error)
+     {
+       goodix_tls_finish (dev, error);
+@@ -1617,9 +1674,16 @@ goodix_tls_poll (FpDevice *dev, gpointer user_data)
+   if (!priv->tls_ready_callback || !priv->tls_hop)
+     return;
+   int result = g_atomic_int_get (&priv->tls_hop->accept_result);
+-  if (result < 0)
+-    {
+-      GError *error = goodix_tls_accept_error (priv->tls_hop);
++  if (result < 0 || g_get_monotonic_time () >= priv->tls_deadline ||
++      (g_cancellable_is_cancelled (priv->transfer_cancel_tkn) ||
++       g_cancellable_is_cancelled (fpi_device_get_cancellable (dev))))
++    {
++      GError *error = result < 0 ? goodix_tls_accept_error (priv->tls_hop) :
++        g_error_new_literal (G_IO_ERROR,
++          (g_cancellable_is_cancelled (priv->transfer_cancel_tkn) ||
++           g_cancellable_is_cancelled (fpi_device_get_cancellable (dev))) ?
++          G_IO_ERROR_CANCELLED : G_IO_ERROR_TIMED_OUT,
++          "TLS handshake cancelled or timed out");
+       /* Reset a registered command callback before its SSM can be freed. */
+       if (priv->ack || priv->reply)
+         goodix_receive_done (dev, NULL, 0, error);
+@@ -1638,67 +1702,57 @@ goodix_tls_poll (FpDevice *dev, gpointer user_data)
+   priv->tls_poll = fpi_device_add_timeout (dev, 10, goodix_tls_poll, NULL, NULL);
+ }
+ 
++static void tls_handshake_run (FpiSsm *ssm, FpDevice *dev);
++
+ static void
+-tls_handshake_run (FpiSsm *ssm, FpDevice *dev)
++goodix_tls_socket_poll (FpDevice *dev, gpointer unused)
+ {
+-  FpiDeviceGoodixTls *self = FPI_DEVICE_GOODIXTLS (dev);
+-  FpiDeviceGoodixTlsPrivate *priv =
+-    fpi_device_goodixtls_get_instance_private (self);
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  priv->tls_socket_poll = NULL;
++  if (priv->tls_ssm)
++    tls_handshake_run (priv->tls_ssm, dev);
++}
+ 
++static void
++tls_handshake_run (FpiSsm *ssm, FpDevice *dev)
++{
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
+   int stage = fpi_ssm_get_cur_state (ssm);
+-
+-  if (stage == TLS_HANDSHAKE_STAGE_HELLO_S)
++  if (stage == TLS_HANDSHAKE_STAGE_HELLO_S ||
++      stage == TLS_HANDSHAKE_STAGE_CHANGE_CIPHER_S)
+     {
+-      guint8 buff[1024];
++      guint8 buff[4096];
+       int size = goodix_tls_client_recv (priv->tls_hop, buff, sizeof (buff));
++      if (size < 0 && (errno == EAGAIN || errno == EINTR))
++        {
++          priv->tls_socket_poll = fpi_device_add_timeout (
++            dev, 10, goodix_tls_socket_poll, NULL, NULL);
++          return;
++        }
+       if (size <= 0)
+         {
+-          fpi_ssm_mark_failed (ssm, g_error_new (g_io_error_quark (), size,
+-                                                 "failed to read tls server "
+-                                                 "hello"));
++          fpi_ssm_mark_failed (ssm, g_error_new_literal (
++            G_IO_ERROR, G_IO_ERROR_FAILED, "TLS proxy closed or failed"));
+           return;
+         }
+-      GError *err = NULL;
+-      if (!goodix_send_pack (dev, GOODIX_FLAGS_TLS, buff, size, NULL, &err))
++      GError *error = NULL;
++      if (!goodix_send_pack (dev, GOODIX_FLAGS_TLS, buff, size, NULL, &error))
+         {
+-          fpi_ssm_mark_failed (ssm, err);
++          fpi_ssm_mark_failed (ssm, error);
+           return;
+         }
+-      fpi_ssm_next_state (ssm);
++      if (stage == TLS_HANDSHAKE_STAGE_CHANGE_CIPHER_S)
++        fpi_ssm_next_state_delayed (ssm, 15);
++      else
++        fpi_ssm_next_state (ssm);
+     }
+   else if (stage < TLS_HANDSHAKE_STAGE_CHANGE_CIPHER_S)
+     {
+-      // Still proxying from hardware
+       fpi_ssm_set_data (ssm, dev, NULL);
+       goodix_read_tls (dev, on_goodix_tls_read_handshake, ssm);
+     }
+-  else if (stage == TLS_HANDSHAKE_STAGE_CHANGE_CIPHER_S)
+-    {
+-      fp_dbg ("Reading to proxy back");
+-      guint8 buff[1024];
+-      int size = goodix_tls_client_recv (priv->tls_hop, buff, sizeof (buff));
+-      if (size <= 0)
+-        {
+-          fpi_ssm_mark_failed (ssm, g_error_new (g_io_error_quark (), size,
+-                                                 "failed to read server "
+-                                                 "handshake"));
+-
+-          return;
+-        }
+-      GError *err = NULL;
+-      if (!goodix_send_pack (dev, GOODIX_FLAGS_TLS, buff, size, NULL, &err))
+-        {
+-          fpi_ssm_mark_failed (ssm, err);
+-          return;
+-        }
+-      /* Give the fw quiet time to finalize its TLS session right after the
+-         server's ChangeCipherSpec+Finished flight. The pyusb reference sleeps
+-         10 ms here ("Important otherwise an USBTimeout error occur"); without
+-         it the fw ACKs subsequent plaintext commands but never marks the TLS
+-         session ready and answers every GET_IMAGE with 0xd0. */
+-      g_usleep (15000);
+-      fpi_ssm_next_state (ssm);
+-    }
+   else if (stage == TLS_HANDSHAKE_STAGE_WAIT_ACCEPT)
+     {
+       int result = g_atomic_int_get (&priv->tls_hop->accept_result);
+@@ -1706,7 +1760,6 @@ tls_handshake_run (FpiSsm *ssm, FpDevice *dev)
+         fpi_ssm_mark_failed (ssm, goodix_tls_accept_error (priv->tls_hop));
+       else if (result > 0)
+         fpi_ssm_next_state (ssm);
+-      /* Pending: the main-context poll will resume this state. */
+     }
+ }
+ 
+@@ -1787,10 +1840,13 @@ goodix_tls (FpDevice *dev, GoodixNoneCallback callback, gpointer user_data)
+       return;
+     }
+ 
++  priv->tls_deadline = g_get_monotonic_time () + GOODIX_TLS_DEADLINE_MS * 1000;
+   priv->tls_poll = fpi_device_add_timeout (dev, 10, goodix_tls_poll, NULL, NULL);
+   goodix_tls_ready (s, err, self);
+ }
+ 
++static void goodix_image_finish (FpDevice *dev, GError *error);
++
+ gboolean
+ goodix_shutdown_tls (FpDevice *dev, GError **error)
+ {
+@@ -1799,48 +1855,111 @@ goodix_shutdown_tls (FpDevice *dev, GError **error)
+     fpi_device_goodixtls_get_instance_private (self);
+ 
+   g_clear_pointer (&priv->tls_poll, g_source_destroy);
+-  if (priv->tls_hop)
+-    {
+-      gboolean rs = goodix_tls_server_deinit (priv->tls_hop, error);
+-      g_free (priv->tls_hop);
+-      priv->tls_hop = NULL;
+-      return rs;
++  g_clear_pointer (&priv->tls_socket_poll, g_source_destroy);
++  GoodixTlsServer *server = g_steal_pointer (&priv->tls_hop);
++  gboolean result = TRUE;
++  if (server)
++    {
++      result = goodix_tls_server_deinit (server, error);
++      if (result)
++        g_free (server);
++      else
++        priv->tls_hop = server; /* Retain resources if joining failed. */
+     }
+-  return TRUE;
++  if (priv->image_callback)
++    goodix_image_finish (dev, g_error_new_literal (
++      G_IO_ERROR, G_IO_ERROR_CANCELLED, "Image read stopped"));
++  return result;
+ }
++#define GOODIX_CAPTURE_IMAGE_BYTES 14260
++
+ static void
+-goodix_tls_ready_image_handler (FpDevice *dev, guint8 *data,
+-                                guint16 length, gpointer user_data,
+-                                GError *error)
+-{
+-  
+-    GoodixCallbackInfo* cb_info = user_data;
+-    GoodixImageCallback callback = (GoodixImageCallback) cb_info->callback;
+-    if (error) {
+-        callback(dev, NULL, 0, cb_info->user_data, error);
+-        g_free(cb_info);
+-        return;
+-    }
+-    FpiDeviceGoodixTls* self = FPI_DEVICE_GOODIXTLS(dev);
+-    FpiDeviceGoodixTlsPrivate* priv =
+-        fpi_device_goodixtls_get_instance_private(self);
+-    goodix_tls_client_send(priv->tls_hop, data, length);
+-
+-  const guint16 size = -1;
+-  guint8 *buff = malloc (size);
+-  GError *err = NULL;
+-  int read_size = goodix_tls_server_receive (priv->tls_hop, buff, size, &err);
++goodix_image_finish (FpDevice *dev, GError *error)
++{
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  GoodixCallbackInfo *info = g_steal_pointer (&priv->image_callback);
++  guint8 *buffer = g_steal_pointer (&priv->image_buffer);
++  guint length = priv->image_length;
++  priv->image_length = 0;
++  g_clear_pointer (&priv->image_poll, g_source_destroy);
++  if (info)
++    {
++      GoodixImageCallback callback = (GoodixImageCallback) info->callback;
++      gpointer user_data = info->user_data;
++      g_free (info);
++      callback (dev, error ? NULL : buffer, error ? 0 : length, user_data, error);
++    }
++  else
++    g_clear_error (&error);
++  g_free (buffer);
++}
+ 
+-  if (read_size <= 0)
++static void
++goodix_image_poll (FpDevice *dev, gpointer unused)
++{
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  priv->image_poll = NULL;
++  if (!priv->image_callback)
++    return;
++  if (!priv->tls_hop || g_cancellable_is_cancelled (priv->transfer_cancel_tkn) ||
++      g_cancellable_is_cancelled (fpi_device_get_cancellable (dev)) ||
++      g_get_monotonic_time () >= priv->image_deadline)
++    {
++      goodix_image_finish (dev, g_error_new_literal (
++        G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "Image TLS read cancelled or timed out"));
++      return;
++    }
++  GError *error = NULL;
++  int size = goodix_tls_server_receive (priv->tls_hop,
++    priv->image_buffer + priv->image_length,
++    GOODIX_CAPTURE_IMAGE_BYTES - priv->image_length + 1, &error);
++  if (error)
++    {
++      goodix_image_finish (dev, error);
++      return;
++    }
++  if (size > 0 && (guint) size > GOODIX_CAPTURE_IMAGE_BYTES - priv->image_length)
+     {
+-      callback (dev, NULL, 0, cb_info->user_data, err);
+-      g_free (cb_info);
++      goodix_image_finish (dev, g_error_new_literal (
++        G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Decrypted image exceeds expected frame length"));
+       return;
+     }
++  if (size > 0)
++    priv->image_length += size;
++  if (priv->image_length == GOODIX_CAPTURE_IMAGE_BYTES)
++    goodix_image_finish (dev, NULL);
++  else
++    priv->image_poll = fpi_device_add_timeout (dev, 10, goodix_image_poll, NULL, NULL);
++}
+ 
+-  callback (dev, buff, read_size, cb_info->user_data, NULL);
+-  free (buff);
+-  g_free (cb_info);
++static void
++goodix_tls_ready_image_handler (FpDevice *dev, guint8 *data,
++                                guint16 length, gpointer user_data, GError *error)
++{
++  GoodixCallbackInfo *info = user_data;
++  if (error)
++    {
++      GoodixImageCallback callback = (GoodixImageCallback) info->callback;
++      callback (dev, NULL, 0, info->user_data, error);
++      g_free (info);
++      return;
++    }
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  g_assert (priv->image_callback == NULL);
++  priv->image_callback = info;
++  priv->image_buffer = g_malloc (GOODIX_CAPTURE_IMAGE_BYTES + 1);
++  priv->image_length = 0;
++  priv->image_deadline = g_get_monotonic_time () + 2000 * 1000;
++  if (!priv->tls_hop || goodix_tls_client_send (priv->tls_hop, data, length) != length)
++    {
++      goodix_image_finish (dev, g_error_new_literal (
++        G_IO_ERROR, G_IO_ERROR_FAILED, "Could not forward encrypted image"));
++      return;
++    }
++  goodix_image_poll (dev, NULL);
+ }
+ 
+ void
+@@ -1856,6 +1975,33 @@ goodix_tls_read_image (FpDevice *dev, GoodixImageCallback callback,
+   goodix_send_mcu_get_image (dev, goodix_tls_ready_image_handler, cb_info);
+ }
+ 
++/* End pending acquisition callbacks before the caller starts deactivation.
++ * Keep a fresh private token for cleanup USB commands; the core capture token
++ * remains cancelled and is checked by acquisition/TLS polls only. */
++void
++goodix_abort_operation (FpDevice *dev)
++{
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  g_cancellable_cancel (priv->transfer_cancel_tkn);
++  g_clear_object (&priv->transfer_cancel_tkn);
++  priv->transfer_cancel_tkn = g_cancellable_new ();
++  if (priv->ack || priv->reply)
++    goodix_receive_done (dev, NULL, 0, g_error_new_literal (
++      G_IO_ERROR, G_IO_ERROR_CANCELLED, "Acquisition command stopped"));
++  else
++    goodix_reset_state (dev);
++  if (priv->image_callback)
++    goodix_image_finish (dev, g_error_new_literal (
++      G_IO_ERROR, G_IO_ERROR_CANCELLED, "Image read stopped"));
++  if (priv->tls_ssm)
++    fpi_ssm_mark_failed (priv->tls_ssm, g_error_new_literal (
++      G_IO_ERROR, G_IO_ERROR_CANCELLED, "TLS establishment stopped"));
++  if (priv->tls_ready_callback)
++    goodix_tls_finish (dev, g_error_new_literal (
++      G_IO_ERROR, G_IO_ERROR_CANCELLED, "TLS establishment stopped"));
++}
++
+ // ---- TLS SECTION END ----
+ 
+ static void
+diff --git a/libfprint/drivers/goodixtls/goodix.h b/libfprint/drivers/goodixtls/goodix.h
+index d2f79a0..c376fb3 100644
+--- a/libfprint/drivers/goodixtls/goodix.h
++++ b/libfprint/drivers/goodixtls/goodix.h
+@@ -340,6 +340,7 @@ gboolean goodix_dev_deinit (FpDevice *dev,
+ 
+ void goodix_reset_state (FpDevice *dev);
+ void goodix_cancel_receive(FpDevice *dev);
++void goodix_abort_operation (FpDevice *dev);
+ 
+ // ---- DEV SECTION END ----
+ 
+diff --git a/libfprint/drivers/goodixtls/goodix55x4.c b/libfprint/drivers/goodixtls/goodix55x4.c
+index 45f5663..413c7fd 100644
+--- a/libfprint/drivers/goodixtls/goodix55x4.c
++++ b/libfprint/drivers/goodixtls/goodix55x4.c
+@@ -118,6 +118,10 @@ struct _FpiDeviceGoodixTls55X4 {
+ 
+   GSList *frames;
+   guint poll_attempts;
++  FpiSsm *scan_ssm;
++  FpiSsm *calibration_ssm;
++  GSource *scan_retry;
++  gboolean deactivating;
+ 
+   // Per-zone finger-detect thresholds measured from this sensor (see above).
+   guint8 fdt_thresholds[GOODIX55X4_FDT_ZONES];
+@@ -214,17 +218,11 @@ static void check_firmware_version(FpDevice *dev, gchar *firmware,
+     return;
+   }
+ 
+-  fp_dbg("Device firmware: \"%s\"", firmware);
+-  g_print("%s\n", firmware);
+-
+-  /* The chip flip-flops its reported family string between GF3208 and GF3268
+-     across cold boots; the meaningful part is the RTSEC_APP version. Accept
+-     any GF32xx_RTSEC_APP_100xx (matches goodix-fp-dump's VALID_FIRMWARE regex)
+-     instead of an exact strcmp against one prefix. */
+-  if (!g_str_has_prefix(firmware, "GF32") ||
+-      !strstr(firmware, "_RTSEC_APP_100")) {
+-    g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+-                "Invalid device firmware: \"%s\"", firmware);
++  /* This experiment is scoped to the firmware reported by the owner's probe.
++   * A related family/version string is not evidence of compatibility. */
++  if (g_strcmp0(firmware, "GF3268_RTSEC_APP_10062") != 0) {
++    g_set_error_literal(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
++                        "Firmware differs from the reviewed capture target");
+     fpi_ssm_mark_failed(user_data, error);
+     return;
+   }
+@@ -261,7 +259,6 @@ static void check_reset(FpDevice *dev, gboolean success, guint16 number,
+ static void check_preset_psk_read(FpDevice *dev, gboolean success,
+                                   guint32 flags, guint8 *psk, guint16 length,
+                                   gpointer user_data, GError *error) {
+-  g_autofree gchar *psk_str = data_to_str(psk, length);
+ 
+   if (error) {
+     fpi_ssm_mark_failed(user_data, error);
+@@ -275,8 +272,6 @@ static void check_preset_psk_read(FpDevice *dev, gboolean success,
+     return;
+   }
+ 
+-  fp_dbg("Device PSK: 0x%s", psk_str);
+-  fp_dbg("Device PSK flags: 0x%08x", flags);
+ 
+   if (flags != GOODIX_55X4_PSK_FLAGS) {
+     g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+@@ -285,16 +280,16 @@ static void check_preset_psk_read(FpDevice *dev, gboolean success,
+     return;
+   }
+ 
+-  if (length != sizeof(goodix_55x4_psk_0)) {
++  if (psk == NULL || length != sizeof(goodix_55x4_psk_0)) {
+     g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+-                "Invalid device PSK: 0x%s", psk_str);
++                "Unexpected device key-state result");
+     fpi_ssm_mark_failed(user_data, error);
+     return;
+   }
+ 
+   if (memcmp(psk, goodix_55x4_psk_0, sizeof(goodix_55x4_psk_0))) {
+     g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+-                "Invalid device PSK: 0x%s", psk_str);
++                "Unexpected device key-state result");
+     fpi_ssm_mark_failed(user_data, error);
+     return;
+   }
+@@ -502,11 +497,15 @@ static void goodix55x4_led_done(FpDevice *dev, guint8 *data, guint16 len,
+   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
+ 
+   if (error) {
+-    // The light is cosmetic; it must never be able to fail an authentication.
+-    // Leave the state UNKNOWN so the next switch is actually sent.
+-    fp_warn("LED command failed, continuing without it: %s", error->message);
+-    g_error_free(error);
++    // This experimental capture relies on the light as its touch prompt.
++    // Leave the state UNKNOWN after an unacknowledged switch.
+     self->led_state = GOODIX55X4_LED_UNKNOWN;
++    if (ssm) {
++      /* The owner waits for this indicator before touching the plate. */
++      fpi_ssm_mark_failed(ssm, error);
++      return;
++    }
++    g_error_free(error);
+   } else {
+     // Resolve the cached state only now that the device has acknowledged.
+     self->led_state =
+@@ -550,18 +549,6 @@ static void goodix55x4_set_led(FpDevice *dev, gboolean on, FpiSsm *ssm) {
+                        goodix55x4_led_done, ssm);
+ }
+ 
+-// Switch the light off without consulting the cache, for the two points where we
+-// take hold of the device and let go of it again. A cached "already off" must not
+-// be trusted there: if it is wrong, the sensor is left lit with nothing running
+-// that could ever switch it off — which is exactly the failure this replaced.
+-// Nothing follows either call, so the redundant command cannot cause a blink.
+-static void goodix55x4_clear_led(FpDevice *dev) {
+-  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
+-
+-  self->led_state = GOODIX55X4_LED_UNKNOWN;
+-  goodix55x4_set_led(dev, FALSE, NULL);
+-}
+-
+ static void check_none_cmd(FpDevice *dev, guint8 *data, guint16 len,
+                            gpointer ssm, GError *err) {
+   if (err) {
+@@ -582,8 +569,13 @@ static unsigned char get_pix(struct fpi_frame_asmbl_ctx *ctx,
+ // Bitdepth is 12, but we have to fit it in a byte
+ static unsigned char squash(int v) { return v / 16; }
+ 
+-static void decode_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
+-                         const guint8 *raw_frame) {
++static gboolean decode_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
++                              const guint8 *raw_frame, guint16 length) {
++  /* The reference acquisition reads 14260 plaintext bytes and drops its
++   * four-byte trailer. Reject truncation before decoding the 14256 pixel bytes.
++   * This validates size only; the trailer's meaning remains unreviewed. */
++  if (raw_frame == NULL || length != GOODIX55X4_RAW_FRAME_SIZE + 4)
++    return FALSE;
+ 
+   Goodix55X4Pix uncropped[GOODIX55X4_SCAN_WIDTH * GOODIX55X4_HEIGHT];
+   Goodix55X4Pix *pix = uncropped;
+@@ -601,7 +593,9 @@ static void decode_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
+       frame[x + y * GOODIX55X4_WIDTH] = uncropped[idx];
+     }
+   }
++  return TRUE;
+ }
++
+ static int goodix_cmp_short(const void *a, const void *b) {
+   return (int)(*(short *)a - *(short *)b);
+ }
+@@ -736,13 +730,13 @@ static void process_frame(Goodix55X4Pix *raw_frame,
+   *(info->frames) = g_slist_append(*(info->frames), frame);
+ }
+ 
+-static void save_frame(FpiDeviceGoodixTls55X4 *self, guint8 *raw) {
+-  Goodix55X4Pix *frame = malloc(GOODIX55X4_FRAME_SIZE * sizeof(Goodix55X4Pix));
+-  decode_frame(frame, raw);
++static void save_frame(FpiDeviceGoodixTls55X4 *self, const Goodix55X4Pix *candidate) {
++  Goodix55X4Pix *frame = g_memdup2(candidate, GOODIX55X4_FRAME_SIZE * sizeof(Goodix55X4Pix));
+   self->frames = g_slist_append(self->frames, frame);
+ }
+ 
+ static void retry_finger_poll(FpDevice *dev, gpointer user_data) {
++  FPI_DEVICE_GOODIXTLS55X4(dev)->scan_retry = NULL;
+   FpiSsm *ssm = user_data;
+   fpi_ssm_jump_to_state(ssm, SCAN_STAGE_SWITCH_TO_FDT_MODE);
+ }
+@@ -758,7 +752,11 @@ static void scan_on_read_img(FpDevice *dev, guint8 *data, guint16 len,
+   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
+ 
+   Goodix55X4Pix candidate[GOODIX55X4_FRAME_SIZE];
+-  decode_frame(candidate, data);
++  if (!decode_frame(candidate, data, len)) {
++    fpi_ssm_mark_failed(ssm, g_error_new_literal(
++      G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Invalid decrypted image size"));
++    return;
++  }
+ 
+   double diff = frame_diff_score(candidate, self->empty_img);
+   if (G_UNLIKELY(self->touch_diff <= 0.0)) {
+@@ -769,7 +767,6 @@ static void scan_on_read_img(FpDevice *dev, guint8 *data, guint16 len,
+     else
+       fp_info("touch threshold overridden to %.0f", self->touch_diff);
+   }
+-  g_print("Finger-detect poll: diff vs background = %.1f\n", diff);
+ 
+   if (diff < self->touch_diff) {
+     if (++self->poll_attempts >= GOODIX55X4_FINGER_DETECT_MAX_ATTEMPTS) {
+@@ -778,13 +775,13 @@ static void scan_on_read_img(FpDevice *dev, guint8 *data, guint16 len,
+       return;
+     }
+ 
+-    fpi_device_add_timeout(dev, GOODIX55X4_FINGER_DETECT_POLL_DELAY_MS,
+-                           retry_finger_poll, ssm, NULL);
++    self->scan_retry = fpi_device_add_timeout(
++      dev, GOODIX55X4_FINGER_DETECT_POLL_DELAY_MS, retry_finger_poll, ssm, NULL);
+     return;
+   }
+ 
+   self->poll_attempts = 0;
+-  save_frame(self, data);
++  save_frame(self, candidate);
+ 
+   /* Multi-frame: keep collecting held frames until we have CAP_FRAMES, then
+      average them pixel-wise. The finger is a static press (not a swipe), so
+@@ -833,6 +830,8 @@ static void scan_on_read_img(FpDevice *dev, guint8 *data, guint16 len,
+ 
+   g_print("Signal IMG Capture\n");
+   fpi_image_device_image_captured(img_dev, img);
++  if (self->deactivating || self->scan_ssm != ssm)
++    return;
+ 
+   // TRIED AND REVERTED: reporting the finger gone here makes the result surface
+   // while the finger is still down (libfprint has the match immediately, it
+@@ -931,6 +930,7 @@ static const guint8 fdt_baseline_55X4[] = {
+ #define GOODIX55X4_CAL_RETRY_DELAY_MS 150
+ 
+ static void retry_calibration(FpDevice *dev, gpointer user_data) {
++  FPI_DEVICE_GOODIXTLS55X4(dev)->scan_retry = NULL;
+   fpi_ssm_jump_to_state(user_data, SCAN_EMPTY_GET_IMG);
+ }
+ 
+@@ -943,7 +943,11 @@ static void on_scan_empty_img(FpDevice *dev, guint8 *data, guint16 length,
+   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
+ 
+   Goodix55X4Pix candidate[GOODIX55X4_FRAME_SIZE];
+-  decode_frame(candidate, data);
++  if (!decode_frame(candidate, data, length)) {
++    fpi_ssm_mark_failed(ssm, g_error_new_literal(
++      G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Invalid decrypted image size"));
++    return;
++  }
+ 
+   // Only accept a baseline the plate agrees on twice in a row. Otherwise a
+   // finger that is still down (or coming off) gets baked into the background,
+@@ -956,30 +960,29 @@ static void on_scan_empty_img(FpDevice *dev, guint8 *data, guint16 length,
+       self->empty_img_valid = TRUE;
+       self->cal_have_prev = FALSE;
+       self->cal_attempts = 0;
+-      g_print("Calibration: baseline accepted (stability %.1f)\n", d);
++      fp_dbg("Calibration baseline accepted");
+       fpi_ssm_next_state(ssm);
+       return;
+     }
+-    g_print("Calibration: plate not settled (%.1f), retrying — finger still on "
+-            "the sensor?\n", d);
++    fp_dbg("Calibration baseline not settled; retrying");
+   }
+ 
+   memcpy(self->cal_prev, candidate, sizeof(self->cal_prev));
+   self->cal_have_prev = TRUE;
+ 
+   if (++self->cal_attempts >= GOODIX55X4_CAL_MAX_ATTEMPTS) {
+-    // Never hang on this: take what we have and let the scan proceed.
+-    memcpy(self->empty_img, candidate, sizeof(self->empty_img));
+-    self->empty_img_valid = TRUE;
++    /* An unstable baseline is not a usable calibration. Stop acquisition
++     * rather than treating a moving/touched plate as an empty reference. */
++    self->empty_img_valid = FALSE;
+     self->cal_have_prev = FALSE;
+     self->cal_attempts = 0;
+-    fp_warn("Calibration never settled; using the last baseline candidate");
+-    fpi_ssm_next_state(ssm);
++    fpi_ssm_mark_failed(ssm, g_error_new_literal(
++      G_IO_ERROR, G_IO_ERROR_FAILED, "Calibration baseline did not settle"));
+     return;
+   }
+ 
+-  fpi_device_add_timeout(dev, GOODIX55X4_CAL_RETRY_DELAY_MS, retry_calibration,
+-                         ssm, NULL);
++  self->scan_retry = fpi_device_add_timeout(
++    dev, GOODIX55X4_CAL_RETRY_DELAY_MS, retry_calibration, ssm, NULL);
+ }
+ /**
+  * @brief Learn this sensor's finger-detect thresholds from an FDT reply.
+@@ -1009,17 +1012,14 @@ static void learn_fdt_thresholds(FpiDeviceGoodixTls55X4 *self,
+     // Masking would wrap silently: this unit reports bases of 352-410, so only
+     // ~20% of headroom separates it from base >= 512. Saturate and say so.
+     if (thr > 0xff) {
+-      fp_warn("FDT zone %d base 0x%x exceeds the 8-bit threshold field", i, base);
++      fp_warn("FDT threshold exceeds the 8-bit field; saturating");
+       thr = 0xff;
+     }
+     self->fdt_thresholds[i] = (guint8)thr;
+   }
+   self->fdt_thresholds_valid = TRUE;
+ 
+-  g_print("FDT thresholds learned from sensor:");
+-  for (int i = 0; i != GOODIX55X4_FDT_ZONES; ++i)
+-    g_print(" %02x", self->fdt_thresholds[i]);
+-  g_print("\n");
++  fp_dbg("FDT thresholds learned from sensor");
+ }
+ 
+ /**
+@@ -1043,6 +1043,11 @@ static void check_fdt_baseline(FpDevice *dev, guint8 *data, guint16 len,
+     fpi_ssm_mark_failed(ssm, err);
+     return;
+   }
++  if (data == NULL || len < GOODIX55X4_FDT_REPLY_HDR + GOODIX55X4_FDT_ZONES * 2) {
++    fpi_ssm_mark_failed(ssm, g_error_new_literal(
++      G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Invalid FDT baseline reply size"));
++    return;
++  }
+   learn_fdt_thresholds(FPI_DEVICE_GOODIXTLS55X4(dev), data, len);
+   fpi_ssm_next_state(ssm);
+ }
+@@ -1073,8 +1078,19 @@ static void scan_empty_run(FpiSsm *ssm, FpDevice *dev) {
+   }
+ }
+ 
++static void scan_empty_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  self->calibration_ssm = NULL;
++  if (error)
++    fpi_ssm_mark_failed(self->scan_ssm, error);
++  else
++    fpi_ssm_next_state(self->scan_ssm);
++}
++
+ static void scan_empty_img(FpDevice *dev, FpiSsm *ssm) {
+-  fpi_ssm_start_subsm(ssm, fpi_ssm_new(dev, scan_empty_run, SCAN_EMPTY_NUM));
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  self->calibration_ssm = fpi_ssm_new(dev, scan_empty_run, SCAN_EMPTY_NUM);
++  fpi_ssm_start(self->calibration_ssm, scan_empty_complete);
+ }
+ 
+ static void scan_get_img(FpDevice *dev, FpiSsm *ssm) {
+@@ -1202,6 +1218,7 @@ static void scan_run_state(FpiSsm *ssm, FpDevice *dev) {
+     }
+     break;
+   case SCAN_STAGE_SWITCH_TO_FDT_DONE:
++    fpi_ssm_mark_completed(ssm);
+     fpi_image_device_report_finger_status(img_dev, FALSE);
+     break;
+   }
+@@ -1228,6 +1245,7 @@ static void sleep_run_state(FpiSsm *ssm, FpDevice *dev) {
+     GError *error = NULL;
+     goodix_shutdown_tls(dev, &error);
+     goodix55X4_reset_state(FPI_DEVICE_GOODIXTLS55X4(img_dev));
++    fpi_ssm_mark_completed(ssm);
+     fpi_image_device_deactivate_complete(img_dev, error);
+     break;
+   }  
+@@ -1243,8 +1261,15 @@ static void write_sensor_complete(FpDevice *dev, gpointer user_data,
+ }
+ 
+ static void scan_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  self->scan_ssm = NULL;
++  g_clear_pointer(&self->scan_retry, g_source_destroy);
++  if (self->deactivating) {
++    g_clear_error(&error);
++    return;
++  }
+   if (error) {
+-    fp_err("failed to scan: %s (code: %d)", error->message, error->code);
++    fpi_image_device_session_error(FP_IMAGE_DEVICE(dev), error);
+     return;
+   }
+   g_print("finished scan!");
+@@ -1253,7 +1278,11 @@ static void scan_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
+ 
+ static void sleep_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
+   if (error) {
+-    fp_err("failed to sleep: %s (code: %d)", error->message, error->code);
++    GError *shutdown_error = NULL;
++    goodix_shutdown_tls(dev, &shutdown_error);
++    g_clear_error(&shutdown_error);
++    goodix55X4_reset_state(FPI_DEVICE_GOODIXTLS55X4(dev));
++    fpi_image_device_deactivate_complete(FP_IMAGE_DEVICE(dev), error);
+     return;
+   }
+   g_print("finished sleep!");
+@@ -1262,8 +1291,8 @@ static void sleep_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
+ 
+ static void scan_start(FpiDeviceGoodixTls55X4 *dev) {
+   dev->poll_attempts = 0;
+-  fpi_ssm_start(fpi_ssm_new(FP_DEVICE(dev), scan_run_state, SCAN_STAGE_NUM),
+-                scan_complete);
++  dev->scan_ssm = fpi_ssm_new(FP_DEVICE(dev), scan_run_state, SCAN_STAGE_NUM);
++  fpi_ssm_start(dev->scan_ssm, scan_complete);
+ }
+ 
+ static void sleep_start(FpDevice *dev, gpointer user_data) {
+@@ -1276,48 +1305,49 @@ static void sleep_start(FpDevice *dev, gpointer user_data) {
+ // ---- DEV SECTION START ----
+ 
+ static void dev_init(FpImageDevice *img_dev) {
+-  FpDevice *dev = FP_DEVICE(img_dev);
+-  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
+   GError *error = NULL;
+-
+-  if (goodix_dev_init(dev, &error)) {
++  if (!goodix_dev_init(FP_DEVICE(img_dev), &error)) {
++    if (error == NULL)
++      error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_FAILED,
++                                  "Failed to claim fingerprint interface");
+     fpi_image_device_open_complete(img_dev, error);
+     return;
+   }
+-
+-  // Start from a known-dark sensor. Clearing the light on close is not enough
+-  // on its own: a killed or crashed fprintd never reaches close, and the sensor
+-  // then sits lit with nobody left to switch it off. The light may also have
+-  // survived from a previous process, so nothing about it is known here.
+-  goodix55x4_clear_led(dev);
+-
++  /* Preserve the prior successful-open command sequence. The scan's LED
++   * commands are serialized by its SSM; do not start one behind open_complete. */
+   fpi_image_device_open_complete(img_dev, NULL);
+ }
+ 
++static void close_led_done(FpDevice *dev, guint8 *data, guint16 length,
++                            gpointer user_data, GError *error) {
++  GError *release_error = NULL;
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  self->led_state = error ? GOODIX55X4_LED_UNKNOWN : GOODIX55X4_LED_OFF;
++  if (!goodix_dev_deinit(dev, &release_error) && release_error == NULL)
++    release_error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_FAILED,
++                                        "Failed to release fingerprint interface");
++  if (error)
++    g_clear_error(&release_error);
++  else
++    error = release_error;
++  fpi_image_device_close_complete(FP_IMAGE_DEVICE(dev), error);
++}
++
+ static void dev_deinit(FpImageDevice *img_dev) {
+   FpDevice *dev = FP_DEVICE(img_dev);
+-  GError *error = NULL;
+-
+-  // Clear the light here rather than on deactivate. Every verify attempt is a
+-  // full activate/deactivate cycle driven from above, so switching it off there
+-  // made it blink between a failed attempt and the retry that follows. The
+-  // device stays *open* across those retries and is only closed once the system
+-  // is genuinely done with the sensor — which is the lifetime the light should
+-  // track. The write itself is synchronous, so it lands before the interface is
+-  // released below.
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  guint8 payload[] = {0x01, 0x00, 0x32};
+   goodix_reset_state(dev);
+-  goodix55x4_clear_led(dev);
+-
+-  if (goodix_dev_deinit(dev, &error)) {
+-    fpi_image_device_close_complete(img_dev, error);
+-    return;
+-  }
+-
+-  fpi_image_device_close_complete(img_dev, NULL);
++  self->led_state = GOODIX55X4_LED_UNKNOWN;
++  /* Release only after the bounded LED-off reply/error. The old code released
++   * the interface while an asynchronous reply was still pending. */
++  goodix_send_protocol(dev, GOODIX_CMD_QUERY_MCU_STATE, payload, sizeof(payload),
++                       NULL, TRUE, GOODIX_TIMEOUT, TRUE, close_led_done, NULL);
+ }
+ 
+ static void dev_activate(FpImageDevice *img_dev) {
+   FpDevice *dev = FP_DEVICE(img_dev);
++  FPI_DEVICE_GOODIXTLS55X4(dev)->deactivating = FALSE;
+ 
+   fpi_ssm_start(fpi_ssm_new(dev, activate_run_state, ACTIVATE_NUM_STATES),
+                 activate_complete);
+@@ -1339,7 +1369,19 @@ static void dev_change_state(FpImageDevice *img_dev,
+ 
+ static void dev_deactivate(FpImageDevice *img_dev) {
+   FpDevice *dev = FP_DEVICE(img_dev);
+-  fpi_device_add_timeout(dev, 250, sleep_start, NULL, NULL);
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  self->deactivating = TRUE;
++  /* Complete pending transport/image callbacks before freeing their SSMs.
++   * Afterwards a retry delay can be the only remaining owner of the SSM. */
++  goodix_abort_operation(dev);
++  g_clear_pointer(&self->scan_retry, g_source_destroy);
++  if (self->calibration_ssm)
++    fpi_ssm_mark_failed(self->calibration_ssm, g_error_new_literal(
++      G_IO_ERROR, G_IO_ERROR_CANCELLED, "Fingerprint scan cancelled"));
++  else if (self->scan_ssm)
++    fpi_ssm_mark_failed(self->scan_ssm, g_error_new_literal(
++      G_IO_ERROR, G_IO_ERROR_CANCELLED, "Fingerprint scan cancelled"));
++  sleep_start(dev, NULL);
+ }
+ 
+ // ---- DEV SECTION END ----
+@@ -1348,6 +1390,12 @@ static void fpi_device_goodixtls55x4_init(FpiDeviceGoodixTls55X4 *self) {
+   self->frames = NULL;
+ }
+ 
++/* The experimental library must not advertise unreviewed related products. */
++static const FpIdEntry capture_id_table[] = {
++  {.vid = 0x27c6, .pid = 0x55a4, .driver_data = GOODIX_55X4_FLAG_LEARN_FDT},
++  {.vid = 0, .pid = 0, .driver_data = 0},
++};
++
+ static void
+ fpi_device_goodixtls55x4_class_init(FpiDeviceGoodixTls55X4Class *class) {
+   FpiDeviceGoodixTlsClass *gx_class = FPI_DEVICE_GOODIXTLS_CLASS(class);
+@@ -1361,7 +1409,7 @@ fpi_device_goodixtls55x4_class_init(FpiDeviceGoodixTls55X4Class *class) {
+   dev_class->id = "goodixtls55x4";
+   dev_class->full_name = "Goodix TLS Fingerprint Sensor 55X4";
+   dev_class->type = FP_DEVICE_TYPE_USB;
+-  dev_class->id_table = id_table;
++  dev_class->id_table = capture_id_table;
+   // Each stage stores one template, and on a sensor this small a template only
+   // covers a narrow patch of the finger — displacement beyond that patch is
+   // what fails to match. More stages = wider covered area = tolerance to the
+diff --git a/libfprint/drivers/goodixtls/goodixtls.c b/libfprint/drivers/goodixtls/goodixtls.c
+index d0cb1b0..17752df 100644
+--- a/libfprint/drivers/goodixtls/goodixtls.c
++++ b/libfprint/drivers/goodixtls/goodixtls.c
+@@ -19,6 +19,8 @@
+ 
+ #include <arpa/inet.h>
+ #include <errno.h>
++#include <gio/gio.h>
++#include <unistd.h>
+ #include <glib.h>
+ #include <netinet/in.h>
+ #include <openssl/crypto.h>
+@@ -49,112 +51,216 @@ err_from_ssl (void)
+                       msg ? msg : "OpenSSL provided no error reason");
+ }
+ 
++/* The worker owns SSL until accept_result is published. The main context only
++ * touches the socket peer during the handshake; teardown joins before freeing. */
+ static unsigned int
+-tls_server_psk_server_callback (SSL           *ssl,
+-                                const char    *identity,
+-                                unsigned char *psk,
+-                                unsigned int   max_psk_len)
++tls_server_psk_server_callback (SSL *ssl, const char *identity,
++                                unsigned char *psk, unsigned int max_psk_len)
+ {
+-  if (sizeof (goodix_511_psk_0) > max_psk_len)
+-    {
+-      fp_dbg ("Provided PSK R is too long for OpenSSL");
+-      return 0;
+-    }
+-  fp_dbg ("PSK WANTED %d", max_psk_len);
+-  // I don't know why we must use OPENSSL_hexstr2buf but just copying zeros
+-  // doesn't work
+-  const char *buff = "000000000000000000000000000000000000000000000000000000000"
+-                     "0000000";
+-  long len = 0;
+-  unsigned char *key = OPENSSL_hexstr2buf (buff, &len);
+-  memcpy (psk, key, len);
+-  OPENSSL_free (key);
+-
+-  return len;
+-}
+-
+-static SSL_CTX *
+-tls_server_create_ctx (void)
+-{
+-  const SSL_METHOD *method;
+-
+-  method = TLS_server_method ();
+-
+-  SSL_CTX *ctx = SSL_CTX_new (method);
+-
+-    return ctx;
++  if (max_psk_len < 32)
++    return 0;
++  memset (psk, 0, 32);
++  return 32;
+ }
+ 
+-static void tls_server_config_ctx(SSL_CTX* ctx)
++int
++goodix_tls_client_send (GoodixTlsServer *self, guint8 *data, guint16 length)
+ {
+-    SSL_CTX_set_ecdh_auto(ctx, 1);
+-    SSL_CTX_set_dh_auto(ctx, 1);
+-    SSL_CTX_set_cipher_list(ctx, "PSK:@SECLEVEL=0");
+-    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+-    SSL_CTX_set_max_proto_version(ctx, TLS1_2_VERSION);
+-    SSL_CTX_set_psk_server_callback(ctx, tls_server_psk_server_callback);
++  /* A short/nonblocking write is a failed transaction, never silently accepted. */
++  return send (self->client_fd, data, length, MSG_NOSIGNAL);
+ }
+ 
+-int goodix_tls_client_send(GoodixTlsServer* self, guint8* data, guint16 length)
++/* Reassemble a complete TLS1.2 server flight before advancing the fixed
++ * device handshake sequence. SOCK_STREAM may split records across reads. */
++static int
++tls_flight_complete (const guint8 *data, guint length)
+ {
+-    return write(self->client_fd, data, length * sizeof(guint8));
+-}
+-int goodix_tls_client_recv(GoodixTlsServer* self, guint8* data, guint16 length) {
+-    return read(self->client_fd, data, length * sizeof(guint8));
++  guint offset = 0;
++  gboolean cipher_changed = FALSE;
++  gboolean terminal = FALSE;
++  while (offset < length)
++    {
++      if (length - offset < 5)
++        return 0;
++      guint bytes = ((guint) data[offset + 3] << 8) | data[offset + 4];
++      if (bytes > 18432 || data[offset + 1] != 3)
++        return -1;
++      if (length - offset - 5 < bytes)
++        return 0;
++      guint kind = data[offset];
++      if (kind == 21)
++        return -1; /* TLS alert */
++      if (kind == 20)
++        cipher_changed = TRUE;
++      else if (kind == 22 && cipher_changed)
++        terminal = TRUE; /* Complete encrypted Finished record. */
++      else if (kind == 22)
++        {
++          guint position = offset + 5;
++          guint end = position + bytes;
++          while (end - position >= 4)
++            {
++              guint message = ((guint) data[position + 1] << 16) |
++                              ((guint) data[position + 2] << 8) | data[position + 3];
++              if (message > end - position - 4)
++                return -1; /* Unsupported split handshake message; fail closed. */
++              if (data[position] == 14 && message == 0)
++                terminal = TRUE; /* ServerHelloDone */
++              position += 4 + message;
++            }
++          if (position != end)
++            return -1;
++        }
++      else
++        return -1;
++      offset += 5 + bytes;
++    }
++  return terminal ? 1 : 0;
+ }
+ 
+-int goodix_tls_server_receive(GoodixTlsServer* self, guint8* data,
+-                              guint32 length, GError** error)
++int
++goodix_tls_client_recv (GoodixTlsServer *self, guint8 *data, guint16 length)
+ {
+-    int retr = SSL_read(self->ssl_layer, data, length * sizeof(guint8));
+-    if (retr <= 0) {
+-        *error = err_from_ssl();
++  while (self->proxy_length < sizeof (self->proxy_buffer))
++    {
++      int result = recv (self->client_fd, self->proxy_buffer + self->proxy_length,
++                          sizeof (self->proxy_buffer) - self->proxy_length, 0);
++      if (result > 0)
++        self->proxy_length += result;
++      else if (result == 0)
++        return 0;
++      else if (errno == EINTR)
++        continue;
++      else if (errno != EAGAIN)
++        return -1;
++      int complete = tls_flight_complete (self->proxy_buffer, self->proxy_length);
++      if (complete < 0 || self->proxy_length > length)
++        {
++          errno = EPROTO;
++          return -1;
++        }
++      if (complete)
++        {
++          memcpy (data, self->proxy_buffer, self->proxy_length);
++          result = self->proxy_length;
++          self->proxy_length = 0;
++          return result;
++        }
++      if (result < 0)
++        return -1; /* EAGAIN: main context will poll later. */
+     }
+-    return retr;
++  errno = EMSGSIZE;
++  return -1;
+ }
+ 
+-static void tls_config_ssl(SSL* ssl)
++int
++goodix_tls_server_receive (GoodixTlsServer *self, guint8 *data,
++                            guint32 length, GError **error)
+ {
+-    SSL_set_min_proto_version(ssl, TLS1_2_VERSION);
+-    SSL_set_max_proto_version(ssl, TLS1_2_VERSION);
+-    SSL_set_psk_server_callback(ssl, tls_server_psk_server_callback);
+-    SSL_set_cipher_list(ssl, "PSK:@SECLEVEL=0");
++  if (g_atomic_int_get (&self->accept_result) != 1)
++    {
++      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
++                           "TLS connection is not established");
++      return -1;
++    }
++  /* accept_result is published as the worker's final SSL operation. Joining
++   * also collects its resources before SSL_read takes ownership of SSL. */
++  if (self->thread_started)
++    {
++      if (pthread_join (self->serve_thread, NULL))
++        {
++          g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
++                               "Could not collect TLS worker");
++          return -1;
++        }
++      self->thread_started = FALSE;
++    }
++  ERR_clear_error ();
++  int result = SSL_read (self->ssl_layer, data, length);
++  if (result <= 0)
++    {
++      int kind = SSL_get_error (self->ssl_layer, result);
++      if (kind == SSL_ERROR_WANT_READ || kind == SSL_ERROR_WANT_WRITE)
++        {
++          errno = EAGAIN;
++          return -1;
++        }
++      g_propagate_error (error, err_from_ssl ());
++    }
++  return result;
+ }
+ 
+-
+ static void *
+ goodix_tls_init_serve (void *me)
+ {
+   GoodixTlsServer *self = me;
++  GError *error = NULL;
++  gint64 deadline = g_get_monotonic_time () + GOODIX_TLS_DEADLINE_MS * 1000;
+ 
+-  fp_dbg ("TLS server waiting to accept...");
+-  int retr = SSL_accept (self->ssl_layer);
+-
+-  fp_dbg ("TLS server accept done");
+-  if (retr <= 0)
+-    self->connection_callback (self, err_from_ssl (), self->user_data);
+-  else
+-    self->connection_callback (self, NULL, self->user_data);
++  while (!g_atomic_int_get (&self->stop_requested))
++    {
++      ERR_clear_error ();
++      int result = SSL_accept (self->ssl_layer);
++      if (result == 1)
++        break;
++      int kind = SSL_get_error (self->ssl_layer, result);
++      if (kind != SSL_ERROR_WANT_READ && kind != SSL_ERROR_WANT_WRITE)
++        {
++          error = err_from_ssl ();
++          break;
++        }
++      if (g_get_monotonic_time () >= deadline)
++        {
++          error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
++                                       "TLS worker handshake timed out");
++          break;
++        }
++      struct pollfd fd = {.fd = self->sock_fd,
++                          .events = kind == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT};
++      int polled = poll (&fd, 1, 100);
++      if (polled < 0 && errno != EINTR)
++        {
++          error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED,
++                                       "TLS worker socket polling failed");
++          break;
++        }
++    }
++  if (g_atomic_int_get (&self->stop_requested) && !error)
++    error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED,
++                                 "TLS worker stopped");
++  self->connection_callback (self, error, self->user_data);
+   return NULL;
+ }
+ 
+ gboolean
+ goodix_tls_server_deinit (GoodixTlsServer *self, GError **error)
+ {
+-  if (self->ssl_layer)
++  g_atomic_int_set (&self->stop_requested, 1);
++  /* shutdown is safe while the worker polls/reads this descriptor. Do not
++   * SSL_shutdown concurrently, cancel the pthread, or close a reusable fd. */
++  if (self->sock_fd >= 0)
++    shutdown (self->sock_fd, SHUT_RDWR);
++  if (self->client_fd >= 0)
++    shutdown (self->client_fd, SHUT_RDWR);
++  if (self->thread_started)
+     {
+-      SSL_shutdown (self->ssl_layer);
+-      SSL_free (self->ssl_layer);
++      int result = pthread_join (self->serve_thread, NULL);
++      if (result)
++        {
++          g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
++                               "Could not join TLS worker; resources retained");
++          return FALSE;
++        }
++      self->thread_started = FALSE;
+     }
++  g_clear_pointer (&self->ssl_layer, SSL_free);
+   if (self->client_fd >= 0)
+     close (self->client_fd);
+   if (self->sock_fd >= 0)
+     close (self->sock_fd);
+-  if (self->ssl_ctx)
+-    SSL_CTX_free (self->ssl_ctx);
+-  if (g_atomic_int_get (&self->accept_result) < 0)
+-    g_clear_error (&self->accept_error);
+-
++  self->client_fd = self->sock_fd = -1;
++  g_clear_pointer (&self->ssl_ctx, SSL_CTX_free);
++  g_clear_error (&self->accept_error);
+   return TRUE;
+ }
+ 
+@@ -162,38 +268,49 @@ gboolean
+ goodix_tls_server_init (GoodixTlsServer *self, GError **error)
+ {
+   g_assert (self->connection_callback);
++  self->sock_fd = self->client_fd = -1;
++  self->ssl_layer = NULL;
++  self->ssl_ctx = NULL;
++  self->thread_started = FALSE;
++  self->proxy_length = 0;
+   self->accept_error = NULL;
+   g_atomic_int_set (&self->accept_result, 0);
+-  SSL_load_error_strings ();
+-  OpenSSL_add_ssl_algorithms ();
+-  SSL_library_init ();
+-  self->ssl_ctx = tls_server_create_ctx ();
+-  tls_server_config_ctx (self->ssl_ctx);
+-
+-  int socks[2] = {0, 0};
+-  if (socketpair (AF_UNIX, SOCK_STREAM, 0, socks) != 0)
++  g_atomic_int_set (&self->stop_requested, 0);
++  self->ssl_ctx = SSL_CTX_new (TLS_server_method ());
++  if (!self->ssl_ctx)
++    goto ssl_failure;
++  if (!SSL_CTX_set_dh_auto (self->ssl_ctx, 1) ||
++      !SSL_CTX_set_cipher_list (self->ssl_ctx, "PSK:@SECLEVEL=0") ||
++      !SSL_CTX_set_min_proto_version (self->ssl_ctx, TLS1_2_VERSION) ||
++      !SSL_CTX_set_max_proto_version (self->ssl_ctx, TLS1_2_VERSION))
++    goto ssl_failure;
++  SSL_CTX_set_psk_server_callback (self->ssl_ctx, tls_server_psk_server_callback);
++
++  int socks[2];
++  if (socketpair (AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, socks))
+     {
+-      g_set_error (error, G_FILE_ERROR, errno,
+-                   "failed to create socket pair: %s", strerror (errno));
+-      return FALSE;
++      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
++                           "Could not create TLS socket pair");
++      goto failure;
+     }
+   self->sock_fd = socks[0];
+   self->client_fd = socks[1];
+-
+-  if (self->ssl_ctx == NULL)
++  self->ssl_layer = SSL_new (self->ssl_ctx);
++  if (!self->ssl_layer || !SSL_set_fd (self->ssl_layer, self->sock_fd))
++    goto ssl_failure;
++  int result = pthread_create (&self->serve_thread, NULL, goodix_tls_init_serve, self);
++  if (result)
+     {
+-      fp_dbg ("Unable to create TLS server context\n");
+-      *error = fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "Unable to "
+-                                                                  "create TLS "
+-                                                                  "server "
+-                                                                  "context");
+-      return FALSE;
++      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
++                           "Could not create TLS worker");
++      goto failure;
+     }
+-  self->ssl_layer = SSL_new (self->ssl_ctx);
+-  tls_config_ssl (self->ssl_layer);
+-  SSL_set_fd (self->ssl_layer, self->sock_fd);
+-
+-  pthread_create (&self->serve_thread, 0, goodix_tls_init_serve, self);
+-
++  self->thread_started = TRUE;
+   return TRUE;
++
++ssl_failure:
++  g_propagate_error (error, err_from_ssl ());
++failure:
++  goodix_tls_server_deinit (self, NULL);
++  return FALSE;
+ }
+diff --git a/libfprint/drivers/goodixtls/goodixtls.h b/libfprint/drivers/goodixtls/goodixtls.h
+index e8b4faa..ae23127 100644
+--- a/libfprint/drivers/goodixtls/goodixtls.h
++++ b/libfprint/drivers/goodixtls/goodixtls.h
+@@ -24,6 +24,7 @@
+ #include <stdatomic.h>
+ 
+ #define GOODIX_TLS_SERVER_PORT 4433
++#define GOODIX_TLS_DEADLINE_MS 15000
+ 
+ // static const guint8 goodix_511_psk_0[64] = {0};
+ static const guint8 goodix_511_psk_0[] = {
+@@ -71,6 +72,10 @@ typedef struct _GoodixTlsServer
+   // SSL* cli_ssl_layer;
+   int       client_fd;
+   pthread_t serve_thread;
++  gboolean  thread_started;
++  gint      stop_requested; /* atomic; checked by worker */
++  guint8    proxy_buffer[4096];
++  guint     proxy_length;
+   gint      accept_result; /* atomic: 0 pending, 1 success, -1 failure */
+   GError   *accept_error;  /* immutable after publishing accept_result */
+ } GoodixTlsServer;
+diff --git a/libfprint/fpi-device.c b/libfprint/fpi-device.c
+index 1b9fa8f..6c60873 100644
+--- a/libfprint/fpi-device.c
++++ b/libfprint/fpi-device.c
+@@ -1688,6 +1688,12 @@ fpi_device_configure_wakeup (FpDevice *device, gboolean enabled)
+ {
+   FpDevicePrivate *priv = fp_device_get_instance_private (device);
+ 
++  /* This local capture experiment must not change sysfs wakeup/persist state.
++   * The restricted driver is used only by the standalone acquisition helper.
++   */
++  if (g_strcmp0 (fp_device_get_driver (device), "goodixtls55x4") == 0)
++    return;
++
+   switch (priv->type)
+     {
+     case FP_DEVICE_TYPE_USB:
+diff --git a/libfprint/libfprint.ver b/libfprint/libfprint.ver
+index d99a456..baaddf0 100644
+--- a/libfprint/libfprint.ver
++++ b/libfprint/libfprint.ver
+@@ -1,6 +1,7 @@
+ LIBFPRINT_2.0.0 {
+ global:
+ 	fp_*;
++	fpi_device_goodixtls55x4_get_type;
+ local:
+ 	*;
+ };

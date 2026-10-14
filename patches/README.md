@@ -38,3 +38,21 @@ This modifies LGPL-2.1-or-later code in the pinned `goodix.c`, `goodix55x4.c`,
 Matthieu CHARETTE and Alireza S.N., and the community patch's attribution.
 No whole driver source/library is vendored. See [the flow trial](../docs/tls-flow-fix.md)
 for provenance, test extraction, exact scope and preserved paths.
+
+## Third correction: bounded standalone capture
+
+`0003-goodix-capture-safety.patch` applies after 0002 in the separate
+`work/libfprint-capture-fixed` variant. It corrects worker teardown, deadlines,
+partial initialization, complete-flight buffering, stale USB callbacks,
+no-response NOP handling, error/privacy paths and bounded image decoding.
+It restricts this experiment to 55a4/firmware 10062, exports its selected type for
+standalone construction and bypasses sysfs wakeup/persist writes for this driver.
+The earlier source/build variants remain unchanged.
+
+Patch SHA-256: `a16bc19971e539809a231744efed1af5cf4b87e51745fbd4201bbdef8de436de`.
+Combined canonical diff: `cd1acfb1aaee0d000396d9ed94a95d8f9d6fcf174f4bf874528e8f7c7b6ed34c`.
+
+This retains LGPL notices from the driver authors named above and Benjamin Berg
+in the changed core device file. Read [the capture report](../docs/private-capture.md)
+for exact operations, host-only evidence, artifacts and limits. It does not
+provision a key, install a driver, demonstrate sensor capture or validate matching.

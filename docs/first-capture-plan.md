@@ -1,7 +1,7 @@
 # Path to the first real capture — prepared 2026-10-14
 
 The next host fixes/build/one-image preparation were subsequently authorized;
-see the standalone capture delivery (covered in a later commit: `private-capture.md`). The key experiment
+see [the standalone capture delivery](private-capture.md). The key experiment
 below is complete and should not be repeated merely to try an image.
 
 The owner wants to try the reader, not keep treating offline checks as hardware
@@ -101,9 +101,9 @@ result and its limits are recorded in [Test 003](key-provisioning-test.md).
 
 The owner reported an immediate post-provisioning `MATCH`. The owner subsequently
 reported one acquired 108 x 88 image with successful close; see
-Test 005 (covered in a later commit: `first-capture-test.md`). The image remains private, without installing
+[Test 005](first-capture-test.md). The image remains private, without installing
 into fprintd or PAM. Host preparation is now complete in the separate capture
-variant; the operation/evidence report (covered in a later commit: `private-capture.md`) identifies exact pins
+variant; [the operation/evidence report](private-capture.md) identifies exact pins
 and the prepared command.
 
 - Remaining lifetime/deadline/init/USB-error/privacy corrections relevant to this
