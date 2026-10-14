@@ -15,12 +15,10 @@ to the owner in Spanish unless asked otherwise.
   sensor changes, explain the exact operations and agree on their scope with the
   owner. Do not infer authorization for future stages from an earlier approval.
   Honor explicit authorizations already given in the conversation.
-- The current stage is auditing and preparing an owner-run local build. The owner
-  completed the bounded firmware/key-state probe; see docs/probe-test.md.
-  Community-driver hardware execution and biometric tests remain pending.
-  Do not run community installers or provisioning utilities. Do not change PAM,
-  sudo, screen locking, or service configuration as part of this stage. A device
-  listing may activate the installed fprintd through D-Bus; document that effect.
+- Current committed milestone: The pinned Nix dependency environment and first local compilation are documented. This is build evidence, not reader support.
+  Do not infer authorization for later hardware, installation or authentication
+  stages from this milestone. Do not run community installers. A device listing
+  can activate installed fprintd through D-Bus; explain that effect.
 - Distinguish local observations, third-party claims, and hypotheses. Link findings
   to a commit and file. Do not present a partial review as a complete audit.
 - Do not publish fingerprint images, templates, dumps, USB captures, secrets, or

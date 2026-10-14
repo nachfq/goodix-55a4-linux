@@ -126,26 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-**D1 (T1, T2) was accepted on 2026-10-08** when the owner requested committing
-the prepared change and continuing. Its scope was local build preparation and
-dependency inspection, without installation or real compilation.
-
-**D2 (T3) is current**, initially limited to the owner running `--plan` and
-`--check-dependencies` and discussing that output. Collaboration mode: the owner
-runs the experiment; the assistant explains and interprets it. Prerequisite setup
-and real compilation require the agreed review points before proceeding.
-
-Resume: D1 is verified and accepted. T3 is awaiting the owner's first dependency
-check output. No real configuration, compilation, package installation, or
-community-driver hardware execution has taken place.
-
-The script reuses inputs from the [source inventory](../../../docs/sources.md)
-and the inspected root, `libfprint/`, `sigfm/`, and `tests/` Meson manifests.
-The first user trial checks prerequisites; if anything is missing, discuss the
-exact setup before actual compilation. The shared-library output is
-`work/libfprint-build/libfprint/libfprint-2.so.2.0.0`; no produced program is run.
-
-D1's preparation, offline checks, and human review are complete. D2 is not
-complete until the owner's trial has yielded reviewed build evidence or a
-concrete failure report. This plan does not authorize package installation or
-subsequent stages.
+Current committed milestone: The pinned Nix dependency environment and first local compilation are documented. This is build evidence, not reader support.
+See [the stage report](../../../docs/nix-build.md).
+No further hardware/installation/auth changes are authorized by this Git staging
+checkpoint. The complete chronological plan is published with the final integration.

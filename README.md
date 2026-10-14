@@ -7,12 +7,7 @@ We will first audit the community implementation, understand the protocol, and
 measure its behavior. That evidence will guide whether to maintain a libfprint
 patch or develop the missing components.
 
-**Status: partial source audit; baseline detection and the owner's bounded query
-completed. Firmware is `GF3268_RTSEC_APP_10062`; expected key state is `MISMATCH`.
-An owner-run local build walkthrough is prepared.** No community driver has been built or tested
-on this laptop. This repository contains
-original documentation and small interactive diagnostic scripts, without vendored
-drivers or installers.
+**Committed stage 1:** The pinned Nix dependency environment and first local compilation are documented. This is build evidence, not reader support.
 
 ## Hands-on walkthrough
 
@@ -83,3 +78,7 @@ The diagnostic probe adapts protocol framing and query definitions from the
 pinned MIT-licensed dump source. Its attribution and license notice are preserved
 in the script and `LICENSES/`. No community driver library is vendored here.
 Review each component's license and preserve attribution before incorporating more code.
+
+## Implemented follow-up stages
+
+- [build(nix): pin dependencies and record the first local build](docs/nix-build.md)

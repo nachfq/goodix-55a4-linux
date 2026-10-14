@@ -93,3 +93,10 @@ libfprint base; goodix-fp-dump supplies protocol and provisioning references.
 GuNanOvO is an unaudited alternative, and official libfprint is the future upstream
 comparison target. These sources inform this project; none is established as a
 trusted installation path by this partial review.
+
+## Committed follow-up progress
+
+- The pinned Nix dependency environment and first local compilation are documented. This is build evidence, not reader support. See [stage report](../docs/nix-build.md).
+
+This commit series groups completed work by functional stage using corrected
+implementations; it does not recreate earlier failing code or authorize new trials.

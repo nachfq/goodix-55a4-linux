@@ -155,15 +155,7 @@ Meson writes generated build files and logs under ignored `work/`. Review any
 output before sharing; a successful compilation establishes that a library was
 built, not that it captures or recognizes fingerprints.
 
-## How we work from here
+## Pinned Nix dependencies and first build
 
-The owner runs the experiments. The assistant prepares small scripts, explains
-their commands, and checks syntax; it waits for the owner's output before drawing
-new hardware conclusions. Hardware execution is delegated to the assistant only
-when explicitly requested. Scripts upload nothing. The query probe saves no logs;
-Meson generates local build logs under ignored `work/`. Share only relevant output
-after reviewing it.
-
-The direct query has been run by the owner and its output discussed. The next
-experiment prepares a local build; it does not provision the mismatched key or
-activate the community driver.
+Read [the environment](nix-build.md) and [build evidence](build-test.md).
+Nix supplies dependencies without installing the driver or changing fprintd.
