@@ -221,3 +221,21 @@ functions with synthetic transport/scheduling and real GLib errors/atomics.
 The assistant ran the authorized trial successfully. This requires the existing
 ignored sources and generated build metadata; a fresh clone cannot run it yet.
 No whole driver library, real TLS handshake or reader is executed by this test.
+
+
+## 8. Prepare the key prerequisite before a real capture
+
+[The next-step report](first-capture-plan.md) explains the concrete command,
+fixed payload, persistent effects and recovery limits. Read
+[scripts/08-provision-key.py](../scripts/08-provision-key.py) and run its default
+plan with `python3 scripts/08-provision-key.py --plan`; this opens no USB device.
+`--check-dependencies` also opens no device. Existing `work/probe-venv` has the
+required PyUSB/libusb. No new package setup is needed on this checkout.
+
+Only the explicit `--write-key` mode can run the hardware experiment, after
+separate scope agreement. It checks firmware and expected state, skips MATCH,
+requires an exact typed confirmation, attempts one logical write and checks again.
+Preparation executed no key write or capture. The owner subsequently ran the
+authorized script and reported MISMATCH-to-MATCH; see [Test 003](key-provisioning-test.md).
+That is immediate key-state evidence, not fingerprint support or recovery proof.
+The successful write need not be repeated.

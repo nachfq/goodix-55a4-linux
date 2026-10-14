@@ -126,7 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: TLS activation findings and the image retry/completion correction are documented with offline regression evidence.
-See [the stage report](../../../docs/tls-flow-fix.md).
+Current committed milestone: Guarded one-shot key provisioning is available. The owner reported immediate MISMATCH-to-MATCH; original-key recovery is unproven.
+See [the stage report](../../../docs/key-provisioning-test.md).
 No further hardware/installation/auth changes are authorized by this Git staging
 checkpoint. The complete chronological plan is published with the final integration.

@@ -99,6 +99,7 @@ trusted installation path by this partial review.
 - The pinned Nix dependency environment and first local compilation are documented. This is build evidence, not reader support. See [stage report](../docs/nix-build.md).
 - TLS error construction is corrected; an isolated library load resolved dependencies and basic types without USB access. See [stage report](../docs/tls-error-fix.md).
 - TLS activation findings and the image retry/completion correction are documented with offline regression evidence. See [stage report](../docs/tls-flow-fix.md).
+- Guarded one-shot key provisioning is available. The owner reported immediate MISMATCH-to-MATCH; original-key recovery is unproven. See [stage report](../docs/key-provisioning-test.md).
 
 This commit series groups completed work by functional stage using corrected
 implementations; it does not recreate earlier failing code or authorize new trials.
