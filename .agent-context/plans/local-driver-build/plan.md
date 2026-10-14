@@ -126,7 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: Private enrollment and comparison are available, with owner-reported same/other outcomes; this does not establish accuracy.
-See [the stage report](../../../docs/private-verification.md).
+Current committed milestone: Private native fprintd sessions now have owner-reported detection, enrollment, sameMATCH and otherNO_MATCH. Host authentication is separate.
+See [the stage report](../../../docs/private-fprintd.md).
 No further hardware/installation/auth changes are authorized by this Git staging
 checkpoint. The complete chronological plan is published with the final integration.

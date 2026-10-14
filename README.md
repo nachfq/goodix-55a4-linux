@@ -7,7 +7,7 @@ We will first audit the community implementation, understand the protocol, and
 measure its behavior. That evidence will guide whether to maintain a libfprint
 patch or develop the missing components.
 
-**Committed stage 6:** Private enrollment and comparison are available, with owner-reported same/other outcomes; this does not establish accuracy.
+**Committed stage 7:** Private native fprintd sessions now have owner-reported detection, enrollment, sameMATCH and otherNO_MATCH. Host authentication is separate.
 
 ## Hands-on walkthrough
 
@@ -87,3 +87,4 @@ Review each component's license and preserve attribution before incorporating mo
 - [feat(provision): guard one-shot sensor key provisioning](docs/key-provisioning-test.md)
 - [feat(capture): bound private acquisition and record the first image](docs/private-capture.md)
 - [feat(verify): add private enrollment and controlled comparison](docs/private-verification.md)
+- [feat(fprintd): isolate native sessions and selected USB inventory](docs/private-fprintd.md)

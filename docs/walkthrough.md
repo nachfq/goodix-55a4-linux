@@ -264,3 +264,22 @@ The first image worked; standalone recognition now has owner-reported results. R
 The owner completed right-index enrollment and reported same/other comparison
 results; that original experiment sequence remains documented for reference. Scripts 13, 15 and 16 prepare and
 check the host code offline; script 14 alone has explicit hardware modes.
+
+## 17. Temporary native fprintd tools
+
+The owner reported the standalone repeatability pilot worked. Read
+[the private fprintd operation and cleanup](private-fprintd.md). Script 17 runs
+installed native tools on a private bus with private state and real private
+Polkit. Start with plan/check-inputs; the first hardware command is detection
+only. Scripts 18/19 build and test the completion observer offline. No host
+authentication configuration is enabled.
+
+After owner-run detection exposed the missing sysfs inventory, script 17 now
+supplies only a read-only synthetic metadata view for the selected reader.
+Script 20 checks actual native FpContext inventory with a fictitious device and
+no USB nodes; it passed. The owner then reported successful real native detection
+and private teardown (Test013), then completing native enrollment with persisted
+state checks passing (Test014). One declared-same native MATCH is owner-reported
+(Test015), followed by one declared-other NO_MATCH (Test016). This completes the
+initial contained native experiment. Agree on the next scope before installation
+or host-service/authentication integration.

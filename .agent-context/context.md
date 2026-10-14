@@ -102,6 +102,7 @@ trusted installation path by this partial review.
 - Guarded one-shot key provisioning is available. The owner reported immediate MISMATCH-to-MATCH; original-key recovery is unproven. See [stage report](../docs/key-provisioning-test.md).
 - The bounded private capture implementation is available. The owner reported one108x88 image and successful close; no image is published. See [stage report](../docs/private-capture.md).
 - Private enrollment and comparison are available, with owner-reported same/other outcomes; this does not establish accuracy. See [stage report](../docs/private-verification.md).
+- Private native fprintd sessions now have owner-reported detection, enrollment, sameMATCH and otherNO_MATCH. Host authentication is separate. See [stage report](../docs/private-fprintd.md).
 
 This commit series groups completed work by functional stage using corrected
 implementations; it does not recreate earlier failing code or authorize new trials.
