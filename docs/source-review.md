@@ -65,8 +65,10 @@ drain pending reads until a timeout and send NOP. There is no key-write or
 firmware-erase call in this initialization path, but it changes USB runtime state.
 Its buffer-draining loop has no overall iteration limit if data keeps arriving.
 
-The patched C driver also performs operations beyond querying: opening sends an
-LED-off command; activation enables the chip, reads firmware/key state, resets
+The patched C driver also performs operations beyond querying. The patch adds an
+LED-off call to open/close, but the [subsequent activation review](tls-activation-review.md#r6--usb-claimrelease-errors-become-successful-openclose)
+shows that successful interface claim returns before the added open call.
+Activation enables the chip, reads firmware/key state, resets
 the sensor, selects idle mode, and uploads configuration before TLS and capture.
 The reviewed 55x4 activation path checks the key and fails if it differs; it does
 not invoke key provisioning. The base sequence is visible in
@@ -112,7 +114,9 @@ Therefore the intended two-retry bound does not accumulate across these retries.
 If the sensor repeatedly requests TLS restart and each handshake succeeds, this
 guard does not terminate recovery. Other errors or cancellation may still end
 the operation. This is a static finding, not an observed hang on this laptop.
-No fix has been applied. A future fix should separate per-command reset from
+No fix had been applied in this review. A [subsequent separate correction](tls-flow-fix.md)
+now preserves the image budget and tests repeated restart responses offline.
+The original patched source remains preserved. The correction separates per-command reset from
 per-image retry state and test repeated restart responses without real hardware.
 
 ## 5. Dependency and license inventory
@@ -134,7 +138,15 @@ The dump repository's root license is MIT. The libfprint root `COPYING` contains
 LGPL 2.1, and the reviewed 55x4 driver header specifies LGPL 2.1 or later.
 Individual files and any code we later incorporate still need attribution review.
 
-## Proposed next small test — not implemented or executed
+## Original narrow-query proposal — owner-run result recorded later
+
+The following proposal was subsequently implemented in
+[`scripts/03-probe-sensor.py`](../scripts/03-probe-sensor.py). See the
+[walkthrough](walkthrough.md) for its plan, dependency check, and offline tests.
+It has not been executed against the sensor by the assistant.
+The owner subsequently ran it and supplied firmware `10062` and expected-key-state
+`MISMATCH`; that later observation is recorded in [Test 002](probe-test.md).
+The proposal below describes the original scope, not an outstanding hardware query.
 
 Prepare a narrow diagnostic that reports only firmware version and whether the
 returned key-state hash matches the public expected value. It should have a

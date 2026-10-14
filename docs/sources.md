@@ -12,7 +12,7 @@ dependencies have been inspected within the scope of the
 | [GuNanOvO/goodix-55x4-linux](https://github.com/GuNanOvO/goodix-55x4-linux) | Pending | Reported alternative; not audited |
 | [Official libfprint](https://gitlab.freedesktop.org/libfprint/libfprint) | Pending | A current comparison baseline has not been selected |
 
-The local `patches/55a4-driver.patch` contains 1290 lines and has this SHA-256:
+The local `work/55a4-driver.patch` contains 1290 lines and has this SHA-256:
 
 ```text
 73720a4418ed7ceb640011f51d4f2bac206118bc480ab6f1784f6618b479ef15
