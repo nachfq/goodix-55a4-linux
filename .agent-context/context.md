@@ -104,6 +104,7 @@ trusted installation path by this partial review.
 - Private enrollment and comparison are available, with owner-reported same/other outcomes; this does not establish accuracy. See [stage report](../docs/private-verification.md).
 - Private native fprintd sessions now have owner-reported detection, enrollment, sameMATCH and otherNO_MATCH. Host authentication is separate. See [stage report](../docs/private-fprintd.md).
 - The contained host deployment is installed; normal CLI detection, enrollment, sameMATCH and otherCLI-NO_MATCH are documented with their limits. See [stage report](../docs/host-deployment.md).
+- Omarchy screen fingerprint unlock is configured; the owner reported both fingerprint and password unlock worked. See [stage report](../docs/lock-screen-integration.md).
 
 This commit series groups completed work by functional stage using corrected
 implementations; it does not recreate earlier failing code or authorize new trials.

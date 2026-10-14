@@ -7,7 +7,7 @@ We will first audit the community implementation, understand the protocol, and
 measure its behavior. That evidence will guide whether to maintain a libfprint
 patch or develop the missing components.
 
-**Committed stage 8:** The contained host deployment is installed; normal CLI detection, enrollment, sameMATCH and otherCLI-NO_MATCH are documented with their limits.
+**Committed stage 9:** Omarchy screen fingerprint unlock is configured; the owner reported both fingerprint and password unlock worked.
 
 ## Hands-on walkthrough
 
@@ -89,3 +89,4 @@ Review each component's license and preserve attribution before incorporating mo
 - [feat(verify): add private enrollment and controlled comparison](docs/private-verification.md)
 - [feat(fprintd): isolate native sessions and selected USB inventory](docs/private-fprintd.md)
 - [feat(deploy): add reversible host installation and native CLI trials](docs/host-deployment.md)
+- [feat(auth): enable Omarchy fingerprint screen unlock](docs/lock-screen-integration.md)

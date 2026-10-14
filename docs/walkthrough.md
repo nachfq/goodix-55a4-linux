@@ -301,3 +301,13 @@ verification then reported `verify-match`/exit0 (Test019). The next accepted
 declared-other trial reported `verify-no-match`/exit1 (Test020); normal CLI
 NO_MATCH can mask internal errors, so it does not provide the private observer
 rejection guarantee. The owner accepted the trials and declined further rounds.
+
+## 22. Use fingerprint for Omarchy screen unlock
+
+The selected first everyday integration is now configured; read
+[the exact PAM change, usage and reversal](lock-screen-integration.md). Omarchy
+uses independent password and fingerprint lock PAM contexts. The new
+`omarchy-lock-fingerprint` recipe is versioned under `config/pam/`; password
+unlock remains available. No sudo/login/Polkit config or extra biometric test
+was performed in that delivery. The owner subsequently reported successful
+unlock with fingerprint and password.

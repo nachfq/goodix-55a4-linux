@@ -126,7 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: The contained host deployment is installed; normal CLI detection, enrollment, sameMATCH and otherCLI-NO_MATCH are documented with their limits.
-See [the stage report](../../../docs/host-deployment.md).
+Current committed milestone: Omarchy screen fingerprint unlock is configured; the owner reported both fingerprint and password unlock worked.
+See [the stage report](../../../docs/lock-screen-integration.md).
 No further hardware/installation/auth changes are authorized by this Git staging
 checkpoint. The complete chronological plan is published with the final integration.
