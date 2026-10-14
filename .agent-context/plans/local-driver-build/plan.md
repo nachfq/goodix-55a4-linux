@@ -126,7 +126,7 @@ not a network sandbox. Tool-version compatibility remains untested.
 
 ## Next delivery
 
-Current committed milestone: TLS error construction is corrected; an isolated library load resolved dependencies and basic types without USB access.
-See [the stage report](../../../docs/tls-error-fix.md).
+Current committed milestone: TLS activation findings and the image retry/completion correction are documented with offline regression evidence.
+See [the stage report](../../../docs/tls-flow-fix.md).
 No further hardware/installation/auth changes are authorized by this Git staging
 checkpoint. The complete chronological plan is published with the final integration.

@@ -185,3 +185,39 @@ The assistant executed this separately authorized experiment successfully;
 see [the trial](library-load-test.md) for the exact command, failed initial attempt,
 final outcome and limits. No reader was opened. This is a library-loading test,
 not a sensor or fingerprint test.
+
+## How we work from here
+
+The owner runs the experiments. The assistant prepares small scripts, explains
+their commands, and checks syntax; it waits for the owner's output before drawing
+new hardware conclusions. Hardware execution is delegated to the assistant only
+when explicitly requested. Scripts upload nothing. The query probe saves no logs;
+Meson generates local build logs under ignored `work/`. Share only relevant output
+after reviewing it.
+
+The direct query was run by the owner; the delegated local build subsequently
+completed. TLS error-path defects exposed by compilation are the recommended next
+source-review target; the constructor has since been corrected and rebuilt in
+[a separate trial](tls-error-fix.md). Its isolated experiment is
+`python3 scripts/05-test-tls-errors.py` (plan) or `--run` inside the existing
+Nix environment. Further source review, provisioning and driver hardware execution
+remain pending.
+
+
+The separately authorized [TLS/activation source review](tls-activation-review.md)
+records seven open findings and future offline validation cases. That delivery
+added documentation only; no new sensor experiment or driver fix was run. Its
+activation map explains what would happen before and after a key mismatch.
+
+
+## 7. Test retry and completion without a reader
+
+Read [scripts/07-test-tls-flow.py](../scripts/07-test-tls-flow.py) and the
+[flow trial](tls-flow-fix.md), starting with the second patch's command-reset
+change and `goodix_tls_finish()`. Default/`--plan` describes the experiment;
+`--check-inputs` validates pins without compilation. Explicit `--run` inside the
+existing Nix environment syntax-checks the changed C units and executes extracted
+functions with synthetic transport/scheduling and real GLib errors/atomics.
+The assistant ran the authorized trial successfully. This requires the existing
+ignored sources and generated build metadata; a fresh clone cannot run it yet.
+No whole driver library, real TLS handshake or reader is executed by this test.

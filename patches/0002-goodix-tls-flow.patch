@@ -1,0 +1,367 @@
+diff --git a/libfprint/drivers/goodixtls/goodix.c b/libfprint/drivers/goodixtls/goodix.c
+--- a/libfprint/drivers/goodixtls/goodix.c
++++ b/libfprint/drivers/goodixtls/goodix.c
+@@ -53,6 +53,8 @@
+   guint32             length;
+ 
+   GoodixCallbackInfo *tls_ready_callback;
++  FpiSsm            *tls_ssm;
++  GSource           *tls_poll;
+ 
+   GCancellable       *transfer_cancel_tkn;
+   gboolean            inited;
+@@ -105,6 +107,8 @@
+   if (!(priv->ack || priv->reply))
+     return;
+ 
++  if (priv->cmd == GOODIX_CMD_MCU_GET_IMAGE)
++    priv->reimage_tries = 0;
+   goodix_reset_state (dev);
+   if (!error)
+     fp_dbg ("Completed command: 0x%02x", priv->cmd);
+@@ -484,6 +488,7 @@
+ 
+   if (error)
+     {
++      priv->reimage_tries = 0;
+       if (cb)
+         cb (dev, NULL, 0, ud, error);
+       return;
+@@ -792,6 +797,11 @@
+ {
+   GoodixDefault payload = {.unused_flags = 0x01};
+   GoodixCallbackInfo *cb_info;
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++
++  /* A new logical image request gets a new budget; internal retries bypass this. */
++  priv->reimage_tries = 0;
+ 
+   if (callback)
+     {
+@@ -1426,7 +1436,7 @@
+   priv->reply = FALSE;
+   priv->callback = NULL;
+   priv->user_data = NULL;
+-  priv->reimage_tries = 0;
++  /* The image recovery budget survives handshake command completion. */
+ }
+ 
+ void
+@@ -1468,6 +1478,35 @@
+ 
+ // ---- TLS SECTION START ----
+ 
++/* Called only on the device's main context. Clear before invoking: the callback
++ * may synchronously start another operation or release the device. */
++static void
++goodix_tls_finish (FpDevice *dev, GError *error)
++{
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  GoodixCallbackInfo *info = g_steal_pointer (&priv->tls_ready_callback);
++  g_clear_pointer (&priv->tls_poll, g_source_destroy);
++  if (!info)
++    {
++      g_clear_error (&error);
++      return;
++    }
++  GoodixNoneCallback callback = (GoodixNoneCallback) info->callback;
++  gpointer user_data = info->user_data;
++  g_free (info);
++  callback (dev, user_data, error);
++}
++
++static GError *
++goodix_tls_accept_error (GoodixTlsServer *server)
++{
++  return server->accept_error ? g_error_copy (server->accept_error) :
++    g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED, "TLS accept failed");
++}
++
++static void goodix_tls_poll (FpDevice *dev, gpointer user_data);
++
+ void
+ goodix_read_tls (FpDevice *dev, GoodixTlsCallback callback,
+                  gpointer user_data)
+@@ -1497,12 +1536,10 @@
+ on_goodix_tls_server_ready (GoodixTlsServer *server, GError *err,
+                             gpointer dev)
+ {
+-  if (err)
+-    {
+-      fp_err ("server ready failed: %s", err->message);
+-      return;
+-    }
+-  fp_dbg ("TLS connection ready");
++  /* Worker thread: publish an immutable result; never invoke device callbacks.
++   * GLib atomics provide the barrier for the error stored before the status. */
++  server->accept_error = err;
++  g_atomic_int_set (&server->accept_result, err ? -1 : 1);
+ }
+ 
+ static void
+@@ -1526,7 +1563,7 @@
+ 
+   int sent = goodix_tls_client_send (priv->tls_hop, data, length);
+ 
+-  if (sent < 0)
++  if (sent != length)
+     {
+       fpi_ssm_mark_failed (ssm, g_error_new (g_io_error_quark (), sent,
+                                              "failed to sent data to "
+@@ -1542,6 +1579,7 @@
+   TLS_HANDSHAKE_STAGE_CHANGE_CIPHER_C,
+   TLS_HANDSHAKE_STAGE_HANDSHAKE_C,
+   TLS_HANDSHAKE_STAGE_CHANGE_CIPHER_S,
++  TLS_HANDSHAKE_STAGE_WAIT_ACCEPT,
+ 
+   TLS_HANDSHAKE_STAGE_NUM,
+ };
+@@ -1550,24 +1588,56 @@
+ on_tls_successfully_established (FpDevice *dev, gpointer user_data,
+                                  GError *error)
+ {
+-  fp_dbg ("HANDSHAKE DONE");
+-  FpiDeviceGoodixTls * self = FPI_DEVICE_GOODIXTLS (dev);
+-  FpiDeviceGoodixTlsPrivate * priv =
+-    fpi_device_goodixtls_get_instance_private (self);
+-  ((GoodixNoneCallback) priv->tls_ready_callback->callback)(
+-    dev, priv->tls_ready_callback->user_data, NULL);
+-  g_clear_pointer (&priv->tls_ready_callback, g_free);
++  goodix_tls_finish (dev, error);
+ }
+ static void
+ tls_handshake_done (FpiSsm *ssm, FpDevice *dev, GError *error)
+ {
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  priv->tls_ssm = NULL;
+   if (error)
+-    fp_dbg ("failed to do tls handshake: %s (code: %d)", error->message,
+-            error->code);
++    {
++      goodix_tls_finish (dev, error);
++      return;
++    }
+   goodix_send_tls_successfully_established (
+     dev, on_tls_successfully_established, NULL);
+ }
+ 
++/* A one-shot device timeout is rescheduled while establishment is pending.
++ * This reports worker failures during asynchronous USB waits. Blocking socket
++ * calls can still delay the main loop: their deadlines are a separate finding. */
++static void
++goodix_tls_poll (FpDevice *dev, gpointer user_data)
++{
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  priv->tls_poll = NULL;
++  if (!priv->tls_ready_callback || !priv->tls_hop)
++    return;
++  int result = g_atomic_int_get (&priv->tls_hop->accept_result);
++  if (result < 0)
++    {
++      GError *error = goodix_tls_accept_error (priv->tls_hop);
++      /* Reset a registered command callback before its SSM can be freed. */
++      if (priv->ack || priv->reply)
++        goodix_receive_done (dev, NULL, 0, error);
++      else if (priv->tls_ssm)
++        fpi_ssm_mark_failed (priv->tls_ssm, error);
++      else
++        goodix_tls_finish (dev, error);
++      return;
++    }
++  if (result > 0 && priv->tls_ssm &&
++      fpi_ssm_get_cur_state (priv->tls_ssm) == TLS_HANDSHAKE_STAGE_WAIT_ACCEPT)
++    {
++      fpi_ssm_next_state (priv->tls_ssm);
++      return;
++    }
++  priv->tls_poll = fpi_device_add_timeout (dev, 10, goodix_tls_poll, NULL, NULL);
++}
++
+ static void
+ tls_handshake_run (FpiSsm *ssm, FpDevice *dev)
+ {
+@@ -1581,7 +1651,7 @@
+     {
+       guint8 buff[1024];
+       int size = goodix_tls_client_recv (priv->tls_hop, buff, sizeof (buff));
+-      if (size < 0)
++      if (size <= 0)
+         {
+           fpi_ssm_mark_failed (ssm, g_error_new (g_io_error_quark (), size,
+                                                  "failed to read tls server "
+@@ -1607,7 +1677,7 @@
+       fp_dbg ("Reading to proxy back");
+       guint8 buff[1024];
+       int size = goodix_tls_client_recv (priv->tls_hop, buff, sizeof (buff));
+-      if (size < 0)
++      if (size <= 0)
+         {
+           fpi_ssm_mark_failed (ssm, g_error_new (g_io_error_quark (), size,
+                                                  "failed to read server "
+@@ -1629,13 +1699,24 @@
+       g_usleep (15000);
+       fpi_ssm_next_state (ssm);
+     }
++  else if (stage == TLS_HANDSHAKE_STAGE_WAIT_ACCEPT)
++    {
++      int result = g_atomic_int_get (&priv->tls_hop->accept_result);
++      if (result < 0)
++        fpi_ssm_mark_failed (ssm, goodix_tls_accept_error (priv->tls_hop));
++      else if (result > 0)
++        fpi_ssm_next_state (ssm);
++      /* Pending: the main-context poll will resume this state. */
++    }
+ }
+ 
+ static void
+ do_tls_handshake (FpDevice *dev)
+ {
+-  fpi_ssm_start (fpi_ssm_new (dev, tls_handshake_run, TLS_HANDSHAKE_STAGE_NUM),
+-                 tls_handshake_done);
++  FpiDeviceGoodixTlsPrivate *priv = fpi_device_goodixtls_get_instance_private (
++    FPI_DEVICE_GOODIXTLS (dev));
++  priv->tls_ssm = fpi_ssm_new (dev, tls_handshake_run, TLS_HANDSHAKE_STAGE_NUM);
++  fpi_ssm_start (priv->tls_ssm, tls_handshake_done);
+ }
+ 
+ static void
+@@ -1645,16 +1726,19 @@
+ {
+   if (error)
+     {
+-      fp_err ("failed to get tls handshake: %s", error->message);
+-      goodix_send_tls_successfully_established (FP_DEVICE (dev), NULL, NULL);
++      goodix_tls_finish (dev, error);
+       return;
+     }
+   FpiDeviceGoodixTls *self = FPI_DEVICE_GOODIXTLS (user_data);
+   FpiDeviceGoodixTlsPrivate *priv =
+     fpi_device_goodixtls_get_instance_private (self);
+ 
+-  goodix_tls_client_send (priv->tls_hop, data, length);
+-
++  if (goodix_tls_client_send (priv->tls_hop, data, length) != length)
++    {
++      goodix_tls_finish (dev, g_error_new_literal (
++        G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to forward TLS ClientHello"));
++      return;
++    }
+   do_tls_handshake (dev);
+ }
+ 
+@@ -1663,8 +1747,7 @@
+ {
+   if (err)
+     {
+-      fp_err ("failed to init tls server: %s, code: %d", err->message,
+-              err->code);
++      goodix_tls_finish (FP_DEVICE (dev), err);
+       return;
+     }
+   goodix_send_request_tls_connection (FP_DEVICE (dev),
+@@ -1685,7 +1768,8 @@
+   FpiDeviceGoodixTlsPrivate *priv =
+     fpi_device_goodixtls_get_instance_private (self);
+   g_assert (priv->tls_hop == NULL);
+-  priv->tls_hop = malloc (sizeof (GoodixTlsServer));
++  priv->tls_hop = g_new0 (GoodixTlsServer, 1);
++  priv->tls_hop->sock_fd = priv->tls_hop->client_fd = -1;
+ 
+   if (!priv->tls_ready_callback)
+     priv->tls_ready_callback = malloc (sizeof (GoodixCallbackInfo));
+@@ -1697,11 +1781,13 @@
+   GError *err = NULL;
+   if (!goodix_tls_server_init (priv->tls_hop, &err))
+     {
+-      fp_err ("failed to init tls server, error: %s, code: %d", err->message,
+-              err->code);
+-      return;
+-    }
+-
++      /* No worker was successfully started on a FALSE init result. */
++      goodix_shutdown_tls (dev, NULL);
++      goodix_tls_finish (dev, err);
++      return;
++    }
++
++  priv->tls_poll = fpi_device_add_timeout (dev, 10, goodix_tls_poll, NULL, NULL);
+   goodix_tls_ready (s, err, self);
+ }
+ 
+@@ -1712,6 +1798,7 @@
+   FpiDeviceGoodixTlsPrivate *priv =
+     fpi_device_goodixtls_get_instance_private (self);
+ 
++  g_clear_pointer (&priv->tls_poll, g_source_destroy);
+   if (priv->tls_hop)
+     {
+       gboolean rs = goodix_tls_server_deinit (priv->tls_hop, error);
+diff --git a/libfprint/drivers/goodixtls/goodix55x4.c b/libfprint/drivers/goodixtls/goodix55x4.c
+--- a/libfprint/drivers/goodixtls/goodix55x4.c
++++ b/libfprint/drivers/goodixtls/goodix55x4.c
+@@ -428,10 +428,6 @@
+ 
+ static void tls_activation_complete(FpDevice *dev, gpointer user_data,
+                                     GError *error) {
+-  if (error) {
+-    fp_err("failed to complete tls activation: %s", error->message);
+-    return;
+-  }
+   FpImageDevice *image_dev = FP_IMAGE_DEVICE(dev);
+ 
+   fpi_image_device_activate_complete(image_dev, error);
+diff --git a/libfprint/drivers/goodixtls/goodixtls.c b/libfprint/drivers/goodixtls/goodixtls.c
+--- a/libfprint/drivers/goodixtls/goodixtls.c
++++ b/libfprint/drivers/goodixtls/goodixtls.c
+@@ -141,13 +141,19 @@
+ gboolean
+ goodix_tls_server_deinit (GoodixTlsServer *self, GError **error)
+ {
+-  SSL_shutdown (self->ssl_layer);
+-  SSL_free (self->ssl_layer);
+-
+-  close (self->client_fd);
+-  close (self->sock_fd);
+-
+-  SSL_CTX_free (self->ssl_ctx);
++  if (self->ssl_layer)
++    {
++      SSL_shutdown (self->ssl_layer);
++      SSL_free (self->ssl_layer);
++    }
++  if (self->client_fd >= 0)
++    close (self->client_fd);
++  if (self->sock_fd >= 0)
++    close (self->sock_fd);
++  if (self->ssl_ctx)
++    SSL_CTX_free (self->ssl_ctx);
++  if (g_atomic_int_get (&self->accept_result) < 0)
++    g_clear_error (&self->accept_error);
+ 
+   return TRUE;
+ }
+@@ -156,6 +162,8 @@
+ goodix_tls_server_init (GoodixTlsServer *self, GError **error)
+ {
+   g_assert (self->connection_callback);
++  self->accept_error = NULL;
++  g_atomic_int_set (&self->accept_result, 0);
+   SSL_load_error_strings ();
+   OpenSSL_add_ssl_algorithms ();
+   SSL_library_init ();
+diff --git a/libfprint/drivers/goodixtls/goodixtls.h b/libfprint/drivers/goodixtls/goodixtls.h
+--- a/libfprint/drivers/goodixtls/goodixtls.h
++++ b/libfprint/drivers/goodixtls/goodixtls.h
+@@ -71,6 +71,8 @@
+   // SSL* cli_ssl_layer;
+   int       client_fd;
+   pthread_t serve_thread;
++  gint      accept_result; /* atomic: 0 pending, 1 success, -1 failure */
++  GError   *accept_error;  /* immutable after publishing accept_result */
+ } GoodixTlsServer;
+ 
+ // This is called only once to init the TLS server.
